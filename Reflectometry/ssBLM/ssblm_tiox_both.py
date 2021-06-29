@@ -1,3 +1,4 @@
+# %load ssBLM_tiox_both.py
 
 import sys
 # append path to your molgroups, or just link molgroups to your same directory
