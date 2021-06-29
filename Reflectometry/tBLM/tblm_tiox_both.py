@@ -1,3 +1,10 @@
+
+# %load tblm_tiox_both.py
+
+#use%%writefile command in 1st line of cell
+
+#%load tblm_tiox_both.py 
+
 import sys
 # append path to your molgroups, or just link molgroups to your same directory
 #sys.path.append('G:\\My Drive\\software\\nr\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
@@ -116,6 +123,8 @@ mollayerh = FunctionalProfile(dimension*stepsize, 0, profile=bilayer, sigma=sigm
 
 
 sampleh = Stack()
+
+
 sampleh.add(layer_silicon)
 sampleh.add(layer_siox)
 sampleh.add(layer_cr)
@@ -226,5 +235,7 @@ modelh = Experiment(sample=sampleh, probe=probeh, dz=zed, step_interfaces = step
 problem = MultiFitProblem([model, modelh])
 
 problem.name = "tblm_tiox_both"
+
+
 
 

@@ -13,8 +13,8 @@ import numpy as np
 import os.path
 
 ## === Data files ===
-probe = load4('ch061.refl', back_reflectivity=False)
-probeh = load4('ch060.refl', back_reflectivity=False)
+probe = load4('os060.refl', back_reflectivity=False)
+probeh = load4('os061.refl', back_reflectivity=False)
 #probe = Probe(T=numpy.linspace(0.18240, 5.7224, 251), L=5.0000)
 
 # Background parameter

@@ -1,3 +1,4 @@
+
 import sys
 # append path to your molgroups, or just link molgroups to your same directory
 #sys.path.append('G:\\My Drive\\software\\nr\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
