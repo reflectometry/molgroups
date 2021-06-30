@@ -1,6 +1,7 @@
 # %load ssBLM_tiox_both.py
 
 import sys
+sys.path.append('.') #current directory with dot
 # append path to your molgroups, or just link molgroups to your same directory
 #sys.path.append('G:\\My Drive\\software\\nr\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
 #sys.path.append('C:\\Users\\joyjp\\Desktop\NIST Summer Internship 2021\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
@@ -8,11 +9,6 @@ import molgroups as mol
 from refl1d.names import *
 from copy import copy
 from refl1d.flayer import FunctionalProfile
-from refl1d.names import *
-import scipy.stats as stats
-import matplotlib.pyplot as plt
-import numpy as np
-import os.path
 
 def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_lipid1, l_lipid2, vf_bilayer):
     """ Fairly generic bilayer. This assumes a stack of materials already existing because siox.l is set to zero """

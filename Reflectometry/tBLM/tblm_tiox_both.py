@@ -6,6 +6,7 @@
 #%load tblm_tiox_both.py 
 
 import sys
+sys.path.append('.')
 # append path to your molgroups, or just link molgroups to your same directory
 #sys.path.append('G:\\My Drive\\software\\nr\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
 #sys.path.append('C:\\Users\\joyjp\\Desktop\NIST Summer Internship 2021\\molgroups\\Diffraction\\Python\\Diffraction_fitting_fp')
