@@ -10,6 +10,7 @@ from refl1d.names import *
 from copy import copy
 from refl1d.flayer import FunctionalProfile
 
+
 def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_lipid1, l_lipid2, vf_bilayer):
     """ Fairly generic bilayer. This assumes a stack of materials already existing because siox.l is set to zero """
     
@@ -20,6 +21,9 @@ def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_li
     # define canvas
     l_siox = 0.0 # could make a parameter in the future
     rho_siox = 0.0
+    bulknsld = bulknsld * 1e-6
+    rho_substrate = rho_substrate * 1e-6
+
 
     blm.fnSet(sigma, bulknsld, global_rough, rho_substrate, rho_siox, l_siox, l_submembrane, l_lipid1, l_lipid2, vf_bilayer)
     
@@ -28,7 +32,7 @@ def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_li
     # this replaces fnWriteCanvas2Model
     nsld = nsl / (normarea * stepsize) + (1.0 - area / normarea) * bulknsld
 
-    return nsld
+    return nsld * 1e6
 
 ## === Data files ===
 probe = load4('ch061.refl', back_reflectivity=True)
