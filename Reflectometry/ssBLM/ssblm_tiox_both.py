@@ -9,7 +9,8 @@ import molgroups as mol
 from refl1d.names import *
 from copy import copy
 from refl1d.flayer import FunctionalProfile
-
+import importlib
+importlib.reload(mol)
 
 def bilayer(z, sigma, bulknsld, global_rough, rho_substrate, l_submembrane, l_lipid1, l_lipid2, vf_bilayer):
     """ Fairly generic bilayer. This assumes a stack of materials already existing because siox.l is set to zero """
