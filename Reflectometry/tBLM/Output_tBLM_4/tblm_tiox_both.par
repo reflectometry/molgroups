@@ -1,0 +1,20 @@
+background os046 -8.57299986235761e-08
+intensity os046 1.00231617092225
+substrate roughness 2.97545669325188
+siox rho 3.45261648606433
+silicon oxide layer 38.7770916404974
+gold chromium roughness 7.89964879529943
+chromium rho 3.92497637793018
+chromium layer 15.1412999533586
+gold rho 4.42014306614191
+d2o rho 6.05093756141957
+inner acyl chain thickness 14.3484980026186
+outer acyl chain thickness 8.22529058717911
+length tether 6.62568255090613
+multiplicity tether 3.70873201128428
+number fraction tether 0.208077183551664
+bilayer roughness 3.26368470452369
+volume fraction bilayer 0.999826393415869
+background os047 3.37693806084851e-06
+h2o rho -0.441520561763505
+gold layer 165.984096578667

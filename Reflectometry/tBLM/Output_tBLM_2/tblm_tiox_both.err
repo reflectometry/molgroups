@@ -2,7 +2,7 @@
 .probe
   .back_absorption = back_absorption os060 = 1
   .background = background os060 = 9.16181e-08 in [-1e-07,1e-05]
-  .intensity = intensity os060 = 1.04967 in [0.9,1.05]
+  .intensity = intensity os060 = 1.04967 in [0.9,1.05]im
   .sample_broadening = sample_broadening os060 = 0
   .theta_offset = theta_offset os060 = 0
 .sample
