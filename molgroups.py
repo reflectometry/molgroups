@@ -90,8 +90,8 @@ class nSLDObj():
             f.write(str(d)+" "+str(dAreaInc)+" "+str(dnSLDInc*dAreaInc*stepsize)+"\n")
         f.write("\n")
 
-    @staticmethod
-    def fnWriteConstant(fp, name, darea, dSLD, dimension, stepsize):
+    #@staticmethod
+    def fnWriteConstant(self, fp, name, darea, dSLD, dimension, stepsize):
         fp.write("Constant " + name + " area " + str(darea) + " \n")
         fp.write("z_" + name + " a_" + name + " nsl_" + name + " \n")
         for i in range (dimension):
