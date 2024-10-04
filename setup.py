@@ -7,8 +7,8 @@ long_description = (this_directory / "README.md").read_text()
 
 setup(
     name='molgroups',
-    version='0.2.0a0',
-    packages=['molgroups'],
+    version='0.2.0a1',
+    packages=['molgroups', 'molgroups.refl1d_interface'],
     url='https://github.com/criosx/molgroups',
     license='MIT License',
     author='Frank Heinrich, David Hoogerheide, Alyssa Thomas',
