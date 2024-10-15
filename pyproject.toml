@@ -39,4 +39,4 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["molgroups", "molgroups.refl1d_interface"]
+packages = ["molgroups"]
