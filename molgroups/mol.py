@@ -2124,7 +2124,7 @@ class Hermite(nSLDObj):
             warnings.simplefilter("ignore")
             results = peak_widths(self.area, [pos], rel_height=0.5)
         rdict[cName]['peak position'] = self.zaxis[pos]
-        rdict[cName]['FWHM'] = results[0] * (self.zaxis[1] - self.zaxis[0])
+        rdict[cName]['FWHM'] = numpy.squeeze(results[0] * (self.zaxis[1] - self.zaxis[0]))
         rdict[cName]['COM'] = numpy.sum(self.area * self.zaxis) / numpy.sum(self.area) if numpy.sum(self.area) != 0 else 0
         rdict[cName]['INT'] = numpy.sum(self.area * numpy.gradient(self.zaxis))
         return rdict
