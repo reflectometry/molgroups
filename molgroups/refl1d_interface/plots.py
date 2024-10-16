@@ -370,7 +370,8 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
         writer.writeheader()
         for origin, v in combined_results.items():
             for property, vlist in v.items():
-                (median, _), (onesigmam, onesigmap), (twosigmam, twosigmap) = credible_interval(np.array(vlist), (0, 0.68, 0.95))
+                #print(origin, property, np.array(vlist).shape)
+                (median, _), (onesigmam, onesigmap), (twosigmam, twosigmap) = credible_interval(np.squeeze(vlist), (0, 0.68, 0.95))
                 value_delta = median if report_delta else 0.0
                 median, onesigmam, onesigmap, twosigmam, twosigmap = (f'{v - value_delta: 0.4g}' for v in (median + value_delta, onesigmam, onesigmap, twosigmam, twosigmap))
                 writer.writerow(dict([(fname, value) for fname, value in zip(FIELDNAMES, [origin, property, twosigmam, onesigmam, median, onesigmap, twosigmap])]))
