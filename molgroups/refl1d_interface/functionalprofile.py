@@ -14,16 +14,21 @@
 from typing import List, Dict, Callable, Tuple
 
 import numpy as np
+from functools import partial
+from copy import deepcopy, copy
 
 from ..mol import nSLDObj
 
 from bumps.dream.state import MCMCDraw
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from refl1d.webview.server.colors import COLORS
-from refl1d.names import Slab, Stack, SLD, Experiment, FitProblem
-from refl1d.flayer import FunctionalProfile
+from refl1d.names import Slab, Stack, SLD, Experiment, FitProblem, Parameter
+from refl1d.model import Layer
+from refl1d.util import merge_ends
 
 import plotly.graph_objs as go
+
+from .layers import MolgroupsStack
 
 def hex_to_rgb(hex_string):
     r_hex = hex_string[1:3]
@@ -85,7 +90,63 @@ def apply_bulknsld(z: np.ndarray,
     # Return nSLD profile in Refl1D units
     return nsld
 
-def make_samples(func: Callable,
+class BaseMolgroupsFunctionalLayer(Layer):
+
+    groups: List[nSLDObj] = []
+    contrast: SLD | None=None
+    thickness: float | Parameter = 0.0
+    name: str | None = None
+
+    def __init__(self,
+                 groups: List[nSLDObj] = [],
+                 contrast: SLD | None=None,
+                 thickness: float | Parameter = 0.0,
+                 name=None,
+                 **kw_parameters) -> None:
+
+        if name is None:
+            name = contrast.name
+        
+        self.name = name
+        self.thickness = Parameter.default(thickness, name=name+" thickness")
+        self.interface = Parameter.default(0.0, name=name+" interface")
+
+        self.magnetism = None
+        self.contrast = contrast
+
+        self._penalty = 0.0
+        self.tol = 1e-3
+
+        self.groups = deepcopy(groups)
+
+        self.kw_parameters = kw_parameters
+
+        for key, kw in kw_parameters.items():
+            setattr(self, key, Parameter.default(kw))
+
+    def parameters(self):
+        # automatically merged with thickness and interface via Layer.layer_parameters
+        return self.contrast.parameters() | self.kw_parameters
+
+    def profile(self, z):
+        raise NotImplementedError
+    
+    def render(self, probe, slabs):
+        Pw, Pz = slabs.microslabs(self.thickness.value)
+        if len(Pw) == 0:
+            return
+        # print kw
+        # TODO: always return rho, irho from profile function
+        # return value may be a constant for rho or irho
+        phi = np.asarray(self.profile(Pz))
+        if phi.shape != Pz.shape:
+            raise TypeError("profile function '%s' did not return array phi(z)" % self.profile.__name__)
+        Pw, phi = merge_ends(Pw, phi, tol=self.tol)
+        # P = M*phi + S*(1-phi)
+        slabs.extend(rho=[np.real(phi)], irho=[np.imag(phi)], w=Pw)
+
+def make_samples(groups: List[nSLDObj],
+                 func: Callable,
                  npoints: int,
                  substrate: Stack | Slab,
                  contrasts: List[SLD],
@@ -113,11 +174,11 @@ def make_samples(func: Callable,
     """
             
     samples = []
-
+    
     for contrast in contrasts:
-        mollayer = FunctionalProfile(npoints, 0, profile=func, bulknsld=contrast.rho, **kwargs)
-        layer_contrast = Slab(material=contrast, thickness=0.0000, interface=5.0000)
-        samples.append(substrate | mollayer | layer_contrast)
+        mollayer = MolgroupsFunctionalProfile(npoints, 0, groups=groups, profile=func, contrast=contrast, bulknsld=contrast.rho, **kwargs)
+        #layer_contrast = Slab(material=contrast, thickness=0.0000, interface=5.0000)
+        samples.append(MolgroupsStack(substrate, mollayer))
 
     return samples
 
@@ -141,7 +202,6 @@ class CVOPlot:
 
 def register_cvo_plot(model: Experiment,
                   z: np.ndarray,
-                  groups: List[nSLDObj],
                   labels: List[str],
                   group_names: Dict[str, List[str]],
                   normarea_group: str | None = None) -> None:
@@ -166,7 +226,7 @@ def register_cvo_plot(model: Experiment,
     model.register_webview_plot('Component Volume Occupancy',
                                 lambda model, problem: cvo_functionalprofileplot(
                                         z,
-                                        groups,
+                                        model.sample.molgroups_layer.groups,
                                         labels,
                                         group_names,
                                         model, problem,
