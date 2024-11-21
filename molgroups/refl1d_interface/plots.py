@@ -2,7 +2,6 @@
     Used with MolgroupsExperiment.register_webview_plot
 """
 
-import csv
 import time
 import numpy as np
 import plotly.graph_objs as go
@@ -10,18 +9,19 @@ import plotly.graph_objs as go
 from typing import List, Dict, Tuple
 
 from bumps.dream.state import MCMCDraw
+from bumps.mapper import MPMapper
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from bumps.plotutil import form_quantiles
 from refl1d.names import FitProblem, Experiment
 from refl1d.webview.server.colors import COLORS
+
+from .layers import MolgroupsLayer
 
 def hex_to_rgb(hex_string):
     r_hex = hex_string[1:3]
     g_hex = hex_string[3:5]
     b_hex = hex_string[5:7]
     return int(r_hex, 16), int(g_hex, 16), int(b_hex, 16)
-
-from .layers import MolgroupsLayer
 
 def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None):
     # component volume occupancy plot
@@ -126,6 +126,45 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
 
 # =============== Uncertainty plot ================
 
+def _MP_calc_profile(problem_point_pair) -> Tuple[Dict, float]:
+    """ Calculate statitics profiles based on a sample draw, for use with
+        multiprocessing
+
+        Adapted from bumps.mapper
+    """
+
+    # given a problem, a model index, and a sample draw, calculate the profiles
+    problem_id, model_index, point = problem_point_pair
+    if problem_id != MPMapper.problem_id:
+        # Problem is pickled using dill when it is available
+        try:
+            import dill
+            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
+        except ImportError:
+            MPMapper.problem = MPMapper.namespace.problem
+        MPMapper.problem_id = problem_id
+
+    return _calc_profile(MPMapper.problem, model_index, point)
+
+def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> Tuple[dict, float]:
+
+    problem.setp(pt)
+    model: Experiment = list(problem.models)[model_index]
+    model.update()
+    model.nllf()
+    layer = model.sample.molgroups_layer
+    imoldat = {}
+    for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
+        for k, v in group._group_names.items():
+            for gp in v:
+                group._stored_profile[gp]['frac_replacement'] = group._stored_profile['frac_replacement']
+
+        imoldat.update(group._stored_profile)
+
+    normarea = layer.base_group._stored_profile['normarea']
+
+    return imoldat, normarea
+
 def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None, state: MCMCDraw | None = None, n_samples: int = 50):
 
     # TODO: allow groups to label some items as uncertainty groups and use the median or best for others
@@ -160,25 +199,16 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     points = points[np.random.permutation(len(points) - 1)]
     points = points[-n_samples:-1]
 
-    for pt in points:
-        problem.setp(pt)
-        model.update()
-        model.nllf()
-        imoldat = {}
-        for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
-            for k, v in group._group_names.items():
-                for gp in v:
-                    group._stored_profile[gp]['frac_replacement'] = group._stored_profile['frac_replacement']
+    mapper = MPMapper.start_mapper(problem)
+    results = MPMapper.pool.map(_MP_calc_profile, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
+    MPMapper.stop_mapper(mapper)
 
-            imoldat.update(group._stored_profile)
-
-        normarea = layer.base_group._stored_profile['normarea']
-
+    for (imoldat, normarea) in results:
         for lbl, item in group_names.items():
             area = 0
             for gp in item:
                 if gp in imoldat.keys():
-                    zaxis = imoldat[gp]['zaxis']
+                    zaxis = imoldat[gp]['zaxis']    
                     newarea = imoldat[gp]['area'] / imoldat[gp]['frac_replacement']
                     area += np.maximum(0, newarea)
             statdata[lbl].append(area / normarea)
@@ -297,6 +327,39 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
 
 # ============= Results table =============
 
+def _MP_calc_stats(problem_point_pair) -> dict:
+    """ Calculate statitics table data based on a sample draw, for use with
+        multiprocessing
+
+        Adapted from bumps.mapper
+    """
+
+    # given a problem, a model index, and a sample draw, calculate the profiles
+    problem_id, model_index, point = problem_point_pair
+    if problem_id != MPMapper.problem_id:
+        # Problem is pickled using dill when it is available
+        try:
+            import dill
+            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
+        except ImportError:
+            MPMapper.problem = MPMapper.namespace.problem
+        MPMapper.problem_id = problem_id
+
+    return _calc_stats(MPMapper.problem, model_index, point)
+
+def _calc_stats(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> dict:
+
+    problem.setp(pt)
+    model: Experiment = list(problem.models)[model_index]
+    model.update()
+    model.nllf()
+    layer = model.sample.molgroups_layer
+    iresults = {'parameters': {k: v for k, v in zip(problem.labels(), pt)}}
+    for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
+        iresults = group._molgroup.fnWriteResults2Dict(iresults, group.name)
+
+    return iresults
+
 def results_table(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None, state: MCMCDraw | None = None, n_samples: int = 50, report_delta=False):
 
     import io
@@ -349,16 +412,10 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
 
     print('Starting statistical analysis...')
     init_time = time.time()
-    results: List[dict] = []
-    for pt in points:
-        problem.setp(pt)
-        model.update()
-        model.nllf()
-        iresults = {'parameters': {k: v for k, v in zip(problem.labels(), pt)}}
-        for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
-            iresults = group._molgroup.fnWriteResults2Dict(iresults, group.name)
 
-        results.append(iresults)
+    mapper = MPMapper.start_mapper(problem)
+    results = MPMapper.pool.map(_MP_calc_stats, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
+    MPMapper.stop_mapper(mapper)
 
     # walk through keys and combine into lists
     combined_results = combine_results(results)
