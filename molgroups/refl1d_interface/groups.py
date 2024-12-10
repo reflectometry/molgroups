@@ -165,6 +165,7 @@ class MolgroupsInterface:
         self._stored_profile = self._molgroup.fnWriteGroup2Dict(dict(frac_replacement=1), self.name, z)
         self._stored_profile = self._molgroup.fnWriteProfile2Dict(self._stored_profile, z)
         self._stored_profile['normarea'] = self._stored_profile['area'].max()
+        self._stored_profile['referencepoints'] = {p.name: p.value for p in self._get_parameters().values() if isinstance(p, ReferencePoint)}
 
     @property
     def group_names(self) -> dict[str, List[str]]:
