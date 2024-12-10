@@ -353,10 +353,11 @@ def _calc_stats(problem: FitProblem | None, model_index: int, pt: np.ndarray | l
     model: Experiment = list(problem.models)[model_index]
     model.update()
     model.nllf()
-    layer = model.sample.molgroups_layer
+    layer: MolgroupsLayer = model.sample.molgroups_layer
     iresults = {'parameters': {k: v for k, v in zip(problem.labels(), pt)}}
     for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
         iresults = group._molgroup.fnWriteResults2Dict(iresults, group.name)
+        iresults[group.name].update(group._stored_profile['referencepoints'])
 
     return iresults
 

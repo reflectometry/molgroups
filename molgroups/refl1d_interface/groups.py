@@ -84,7 +84,9 @@ class MolgroupsInterface:
                     setattr(self, f.name, Parameter.default(p, name=f'{self.name} {default_name}'))
             elif f.type == ReferencePoint:
                 p: ReferencePoint = getattr(self, f.name)
-                p.name = f'{self.name} {p.name}'
+                default_name = f.default_factory().name
+                if p.name == default_name:
+                    p.name = f'{self.name} {p.name}'
                 setattr(self, f.name, p)
 
     def _get_parameters(self) -> dict[str, Parameter]:
