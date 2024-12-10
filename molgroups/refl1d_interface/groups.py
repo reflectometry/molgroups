@@ -84,7 +84,9 @@ class MolgroupsInterface:
                     setattr(self, f.name, Parameter.default(p, name=f'{self.name} {default_name}'))
             elif f.type == ReferencePoint:
                 p: ReferencePoint = getattr(self, f.name)
-                p.name = f'{self.name} {p.name}'
+                default_name = f.default_factory().name
+                if p.name == default_name:
+                    p.name = f'{self.name} {p.name}'
                 setattr(self, f.name, p)
 
     def _get_parameters(self) -> dict[str, Parameter]:
@@ -165,6 +167,7 @@ class MolgroupsInterface:
         self._stored_profile = self._molgroup.fnWriteGroup2Dict(dict(frac_replacement=1), self.name, z)
         self._stored_profile = self._molgroup.fnWriteProfile2Dict(self._stored_profile, z)
         self._stored_profile['normarea'] = self._stored_profile['area'].max()
+        self._stored_profile['referencepoints'] = {p.name: p.value for p in self._get_parameters().values() if isinstance(p, ReferencePoint)}
 
     @property
     def group_names(self) -> dict[str, List[str]]:
@@ -192,8 +195,10 @@ class BLMInterface(MolgroupsInterface):
     outer_lipid_nf: List[Parameter] = field(default_factory=list)
     startz: Parameter = field(default_factory=lambda: Parameter(name='position of inner hydrophobic interface', value=0.9))
     vf_bilayer: Parameter = field(default_factory=lambda: Parameter(name='volume fraction', value=0.9))
+    l_hg1: Parameter = field(default_factory=lambda: Parameter(name='inner headgroup thickness', value=10.0))
     l_lipid1: Parameter = field(default_factory=lambda: Parameter(name='inner acyl chain thickness', value=10.0))
     l_lipid2: Parameter = field(default_factory=lambda: Parameter(name='outer acyl chain thickness', value=10.0))
+    l_hg2: Parameter = field(default_factory=lambda: Parameter(name='outer headgroup thickness', value=10.0))    
     sigma: Parameter = field(default_factory=lambda: Parameter(name='roughness', value=5))
     normarea: Parameter = field(default_factory=lambda: Parameter(name='normarea', value=1))
 
@@ -233,6 +238,12 @@ class BLMInterface(MolgroupsInterface):
 
     def update(self, bulknsld: float):
 
+        for hg in self._molgroup.headgroups1:
+            hg.length = self.l_hg1.value
+
+        for hg in self._molgroup.headgroups2:
+            hg.length = self.l_hg2.value
+
         self._molgroup.fnSet(sigma=self.sigma.value,
             bulknsld=bulknsld * 1e-6,
             startz=self.startz.value,
@@ -258,6 +269,7 @@ class MonolayerInterface(MolgroupsInterface):
     startz: Parameter = field(default_factory=lambda: Parameter(name='position of hydrophobic interface', value=20))
     vf_lipids: Parameter = field(default_factory=lambda: Parameter(name='volume fraction', value=0.9))
     l_lipid: Parameter = field(default_factory=lambda: Parameter(name='acyl chain thickness', value=10.0))
+    l_hg: Parameter = field(default_factory=lambda: Parameter(name='headgroup thickness', value=10.0))    
     sigma: Parameter = field(default_factory=lambda: Parameter(name='roughness', value=5))
     normarea: Parameter = field(default_factory=lambda: Parameter(name='normarea', value=1))
 
@@ -287,6 +299,9 @@ class MonolayerInterface(MolgroupsInterface):
         super().__post_init__()
 
     def update(self, bulknsld: float):
+
+        for hg in self._molgroup.headgroups2:
+            hg.length = self.l_hg.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
             bulknsld=bulknsld * 1e-6,
@@ -358,8 +373,10 @@ class ssBLMInterface(BaseGroupInterface):
     rho_siox: Parameter = field(default_factory=lambda: Parameter(name='rho siox', value=3.3))
     l_siox: Parameter = field(default_factory=lambda: Parameter(name='siox thickness', value=0.0))
     vf_bilayer: Parameter = field(default_factory=lambda: Parameter(name='volume fraction bilayer', value=0.9))
+    l_hg1: Parameter = field(default_factory=lambda: Parameter(name='inner headgroup thickness', value=10.0))
     l_lipid1: Parameter = field(default_factory=lambda: Parameter(name='inner acyl chain thickness', value=10.0))
     l_lipid2: Parameter = field(default_factory=lambda: Parameter(name='outer acyl chain thickness', value=10.0))
+    l_hg2: Parameter = field(default_factory=lambda: Parameter(name='outer headgroup thickness', value=10.0))    
     sigma: Parameter = field(default_factory=lambda: Parameter(name='bilayer roughness', value=5))
     substrate_rough: Parameter = field(default_factory=lambda: Parameter(name ='substrate roughness', value=5))
     l_submembrane: Parameter = field(default_factory=lambda: Parameter(name='submembrane thickness', value=10))
@@ -408,6 +425,12 @@ class ssBLMInterface(BaseGroupInterface):
 
         self._molgroup.substrate.length = 2.0 * self.overlap.value
 
+        for hg in self._molgroup.headgroups1:
+            hg.length = self.l_hg1.value
+
+        for hg in self._molgroup.headgroups2:
+            hg.length = self.l_hg2.value
+
         self._molgroup.fnSet(sigma=self.sigma.value,
             bulknsld=bulknsld * 1e-6,
             global_rough=self.substrate_rough.value,
@@ -439,8 +462,10 @@ class tBLMInterface(BaseGroupInterface):
     outer_lipid_nf: List[Parameter] = field(default_factory=list)
     rho_substrate: Parameter = field(default_factory=lambda: Parameter(name='rho substrate', value=2.07))
     vf_bilayer: Parameter = field(default_factory=lambda: Parameter(name='volume fraction bilayer', value=0.9))
+    l_hg1: Parameter = field(default_factory=lambda: Parameter(name='inner headgroup thickness', value=10.0))
     l_lipid1: Parameter = field(default_factory=lambda: Parameter(name='inner acyl chain thickness', value=10.0))
     l_lipid2: Parameter = field(default_factory=lambda: Parameter(name='outer acyl chain thickness', value=10.0))
+    l_hg2: Parameter = field(default_factory=lambda: Parameter(name='outer headgroup thickness', value=10.0))    
     sigma: Parameter = field(default_factory=lambda: Parameter(name='bilayer roughness', value=5))
     substrate_rough: Parameter = field(default_factory=lambda: Parameter(name ='substrate roughness', value=5))
     l_tether: Parameter = field(default_factory=lambda: Parameter(name='tether length', value=10))
@@ -493,6 +518,12 @@ class tBLMInterface(BaseGroupInterface):
     def update(self, bulknsld: float):
 
         self._molgroup.substrate.length = 2.0 * self.overlap.value
+
+        for hg in self._molgroup.headgroups1:
+            hg.length = self.l_hg1.value
+
+        for hg in self._molgroup.headgroups2:
+            hg.length = self.l_hg2.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
             bulknsld=bulknsld * 1e-6,

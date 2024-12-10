@@ -197,3 +197,5 @@ class MolgroupsStack(Stack):
                          thickness=None)
         
         self.substrate, self.molgroups_layer = substrate, molgroups_layer
+
+        self.molgroups_layer.update()
