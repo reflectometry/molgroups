@@ -267,6 +267,7 @@ class MonolayerInterface(MolgroupsInterface):
     startz: Parameter = field(default_factory=lambda: Parameter(name='position of hydrophobic interface', value=20))
     vf_lipids: Parameter = field(default_factory=lambda: Parameter(name='volume fraction', value=0.9))
     l_lipid: Parameter = field(default_factory=lambda: Parameter(name='acyl chain thickness', value=10.0))
+    l_hg: Parameter = field(default_factory=lambda: Parameter(name='headgroup thickness', value=10.0))    
     sigma: Parameter = field(default_factory=lambda: Parameter(name='roughness', value=5))
     normarea: Parameter = field(default_factory=lambda: Parameter(name='normarea', value=1))
 
@@ -296,6 +297,9 @@ class MonolayerInterface(MolgroupsInterface):
         super().__post_init__()
 
     def update(self, bulknsld: float):
+
+        for hg in self._molgroup.headgroups2:
+            hg.length = self.l_hg.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
             bulknsld=bulknsld * 1e-6,
