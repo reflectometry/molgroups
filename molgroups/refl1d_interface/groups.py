@@ -82,6 +82,12 @@ class MolgroupsInterface:
                         setattr(self, f.name, p)
                 else:
                     setattr(self, f.name, Parameter.default(p, name=f'{self.name} {default_name}'))
+            elif f.type == List[Parameter]:
+                plist = getattr(self, f.name)
+                for i, p in enumerate(plist):
+                    p = Parameter.default(p, name=f'{self.name} {f.name}{i}')
+                    plist[i] = p
+                setattr(self, f.name, plist)
             elif f.type == ReferencePoint:
                 p: ReferencePoint = getattr(self, f.name)
                 default_name = f.default_factory().name
@@ -98,21 +104,13 @@ class MolgroupsInterface:
 
         pars = {}
         for f in fields(self):
-            if f.type == Parameter:
+            if f.type in (Parameter, ReferencePoint):
                 p = getattr(self, f.name)
-                p = Parameter.default(p, name=f'{self.name} {f.name}')
-                setattr(self, f.name, p)
-                pars.update({f'{self.name} {f.name}': p})
+                pars.update({f'{self.name} {p.name}': p})
             elif f.type == List[Parameter]:
                 plist = getattr(self, f.name)
                 for i, p in enumerate(plist):
-                    p = Parameter.default(p, name=f'{self.name} {f.name}{i}')
                     pars.update({f'{self.name} {f.name}{i}': p})
-                    plist[i] = p
-                setattr(self, f.name, plist)
-            elif f.type == ReferencePoint:
-                p: ReferencePoint = getattr(self, f.name)
-                pars.update({f'{self.name} {p.name}': p})
 
         return pars
 

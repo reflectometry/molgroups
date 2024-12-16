@@ -198,4 +198,5 @@ class MolgroupsStack(Stack):
         
         self.substrate, self.molgroups_layer = substrate, molgroups_layer
 
+    def __post_init__(self):
         self.molgroups_layer.update()
