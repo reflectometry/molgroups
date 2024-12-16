@@ -5,7 +5,7 @@ import numpy as np
 from scipy.integrate import trapezoid
 
 from refl1d.names import Parameter, SLD, Stack, Slab
-from refl1d.model import Layer
+from refl1d.sample.layers import Layer
 
 from .groups import BaseGroupInterface, MolgroupsInterface
 
@@ -150,7 +150,7 @@ class MolgroupsLayer(Layer):
         return nsld
 
     def render(self, probe, slabs) -> None:
-        """Adapted from refl1d.flayer.FunctionalProfile
+        """Adapted from refl1d.sample.flayer.FunctionalProfile
         """
         Pw, Pz = slabs.microslabs(self.thickness)
         if len(Pw) == 0:

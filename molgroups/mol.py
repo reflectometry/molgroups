@@ -9,7 +9,7 @@ from scipy.signal import peak_widths
 import sys
 import warnings
 
-from refl1d.polymer import mushroom_math, smear
+from refl1d.sample.polymer import mushroom_math, smear
 
 from periodictable.fasta import Molecule, AMINO_ACID_CODES as aa
 from periodictable.core import default_table
@@ -2747,7 +2747,7 @@ class BLMProteinComplex(CompositenSLDObj):
 class PolymerMushroom(nSLDObj):
     """Polymer mushroom model (relatively low grafting density)
 
-        Uses refl1d.polymer.mushroom_math
+        Uses refl1d.sample.polymer.mushroom_math
     """
     def __init__(self, startz=0.0, rho=0.7e-6, vf=0.1, Rg=7.0, delta=1.0, normarea=1.0, sigma=2.0, name=None):
         super().__init__(name=name)
@@ -2765,7 +2765,7 @@ class PolymerMushroom(nSLDObj):
         v = numpy.zeros_like(z)
         x = (z - self.startz) / self.Rg
 
-        # protect against divide by zero error (from refl1d.polymer)
+        # protect against divide by zero error (from refl1d.sample.polymer)
         delta_thresh = 1e-10
 
         if abs(self.delta) > delta_thresh:
@@ -2829,7 +2829,7 @@ class PolymerMushroom(nSLDObj):
 class PolymerBrush(nSLDObj):
     """Polymer brush model (parabolic profile)
     
-        Adapted from refl1d.polymer.PolymerBrush.profile
+        Adapted from refl1d.sample.polymer.PolymerBrush.profile
     """
     def __init__(self, startz=0.0, base_length=10, interface_length=10, thinning_power=1, rho=0.7e-6, vf=0.1, normarea=1.0, sigma=2.0, name=None):
         super().__init__(name=name)
