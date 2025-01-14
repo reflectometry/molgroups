@@ -53,8 +53,13 @@ class MolgroupsMixedExperiment(MixedExperiment):
                  interpolation=0,
                  **kw):
         super().__init__(samples, ratio, probe, name, coherent, interpolation, **kw)
-        self.parts = [MolgroupsExperiment(s, probe, name=s.name, **kw) for s in samples]
-        for i, p in enumerate(self.parts):
+        for i, (p, s) in enumerate(zip(self.parts, self.samples)):
+            
+            # if MolgroupsStack samples, use MolgroupsExperiments
+            if isinstance(s, MolgroupsStack):
+                p = MolgroupsExperiment(s, probe, name=s.name, **kw)
+
+            # experiment inherits registered webview plots
             for key, item in p._webview_plots.items():
                 self._webview_plots.update({f'{i}: {key}': item})
 
