@@ -1,4 +1,5 @@
 from molgroups.refl1d_interface.experiment import (MolgroupsExperiment,
+                                                   MolgroupsMixedExperiment,
                                                    make_samples)
 
 from molgroups.refl1d_interface.layers import (MolgroupsStack,
