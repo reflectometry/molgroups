@@ -1,10 +1,10 @@
 """Defines a Refl1D Experiment object with molgroups support"""
 
-from typing import List
+from typing import List, Optional
 from dataclasses import dataclass
 import functools
 
-from refl1d.names import Experiment, Stack, SLD
+from refl1d.names import Experiment, Stack, SLD, MixedExperiment
 
 from .layers import MolgroupsStack, MolgroupsLayer
 from .plots import cvo_plot, cvo_uncertainty_plot, results_table
@@ -41,8 +41,25 @@ class MolgroupsExperiment(Experiment):
                                    plot_function=functools.partial(results_table, self.sample.molgroups_layer, report_delta=True),
                                    change_with='uncertainty')        
 
+@dataclass(init=False)
+class MolgroupsMixedExperiment(MixedExperiment):
+    samples: Optional[List[MolgroupsStack]]
+
+    def __init__(self, samples: Optional[List[MolgroupsStack | Stack]]=None,
+                 ratio=None,
+                 probe=None,
+                 name=None,
+                 coherent=False,
+                 interpolation=0,
+                 **kw):
+        super().__init__(samples, ratio, probe, name, coherent, interpolation, **kw)
+        self.parts = [MolgroupsExperiment(s, probe, name=s.name, **kw) for s in samples]
+        for i, p in enumerate(self.parts):
+            for key, item in p._webview_plots.items():
+                self._webview_plots.update({f'{i}: {key}': item})
 
 def make_samples(layer_template: MolgroupsLayer, substrate: Stack, contrasts: List[SLD]) -> List[MolgroupsStack]:
+
     """Create samples from combining a substrate stack with a molgroups layer
     
         Args:
