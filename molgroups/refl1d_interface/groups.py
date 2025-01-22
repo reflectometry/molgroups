@@ -2,8 +2,9 @@
     Uses Refl1D Parameter objects for parameters, thus allowing model serialization
 """
 
-from typing import List, Tuple, Callable, Dict, TypedDict
+from typing import List, Tuple, Callable, Dict, TypedDict, Type, TypeVar
 from dataclasses import dataclass, field, fields
+import copy
 import uuid
 import functools
 
@@ -19,6 +20,8 @@ from molgroups.mol import (nSLDObj, BLM, ssBLM, tBLM, Monolayer, Box2Err,
 from molgroups.components import Component, Lipid, Tether, bme
 
 from periodictable.fasta import H2O_SLD, D2O_SLD
+
+_T = TypeVar("_T")
 
 def sld_from_bulk(rhoH: float, rhoD: float, bulknsld: float, protexchratio: float = 1.0) -> float:
     """Calculates scattering length density of material with
@@ -60,6 +63,7 @@ class MolgroupsInterface:
     id: str | None = None
     name: str | None = None
     nf: Parameter = field(default_factory=lambda: Parameter(name='number fraction', value=1))
+    bulknsld: Parameter = field(default_factory=lambda: Parameter(name='solvent rho', value=0.0))
     _molgroup: nSLDObj | None = None
     _stored_profile: dict | None = None
     _group_names: dict[str, List[str]] = field(default_factory=dict)
@@ -67,7 +71,7 @@ class MolgroupsInterface:
     def __post_init__(self) -> None:
 
         if self.id is None:
-            self.id = str(uuid.uuid4())
+            self._generate_id()
 
         if not self._group_names:
             self._group_names = {f'{self.name}': [f'{self.name}']}
@@ -95,6 +99,9 @@ class MolgroupsInterface:
                     p.name = f'{self.name} {p.name}'
                 setattr(self, f.name, p)
 
+    def _generate_id(self):
+        self.id = str(uuid.uuid4())
+
     def _get_parameters(self) -> dict[str, Parameter]:
         """Gets a list of the parameters associated with the interactor
 
@@ -114,7 +121,7 @@ class MolgroupsInterface:
 
         return pars
 
-    def update(self, bulknsld: float) -> None:
+    def update(self) -> None:
         """Updates the molecular group with current values of the parameters,
             usually by calling fnSet
         """
@@ -234,7 +241,7 @@ class BLMInterface(MolgroupsInterface):
 
         super().__post_init__()
 
-    def update(self, bulknsld: float):
+    def update(self):
 
         for hg in self._molgroup.headgroups1:
             hg.length = self.l_hg1.value
@@ -243,7 +250,7 @@ class BLMInterface(MolgroupsInterface):
             hg.length = self.l_hg2.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
-            bulknsld=bulknsld * 1e-6,
+            bulknsld=self.bulknsld.value * 1e-6,
             startz=self.startz.value,
             l_lipid1=self.l_lipid1.value,
             l_lipid2=self.l_lipid2.value,
@@ -296,13 +303,13 @@ class MonolayerInterface(MolgroupsInterface):
 
         super().__post_init__()
 
-    def update(self, bulknsld: float):
+    def update(self):
 
         for hg in self._molgroup.headgroups2:
             hg.length = self.l_hg.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
-            bulknsld=bulknsld * 1e-6,
+            bulknsld=self.bulknsld.value * 1e-6,
             startz=self.startz.value,
             l_lipid2=self.l_lipid.value,
             vf_bilayer=self.vf_lipids.value,
@@ -347,7 +354,7 @@ class SubstrateInterface(BaseGroupInterface):
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
         self._molgroup.fnSet(volume=self.normarea.value * self.overlap.value * 2.0,
                              length=2.0 * self.overlap.value,
@@ -419,7 +426,7 @@ class ssBLMInterface(BaseGroupInterface):
 
         super().__post_init__()
 
-    def update(self, bulknsld: float):
+    def update(self):
 
         self._molgroup.substrate.length = 2.0 * self.overlap.value
 
@@ -432,7 +439,7 @@ class ssBLMInterface(BaseGroupInterface):
             hg.length = self.l_hg2.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
-            bulknsld=bulknsld * 1e-6,
+            bulknsld=self.bulknsld.value * 1e-6,
             global_rough=self.substrate_rough.value,
             rho_substrate=self.rho_substrate.value * 1e-6,
             rho_siox=self.rho_siox.value * 1e-6,
@@ -515,7 +522,7 @@ class tBLMInterface(BaseGroupInterface):
 
         super().__post_init__()
 
-    def update(self, bulknsld: float):
+    def update(self):
 
         self._molgroup.substrate.length = 2.0 * self.overlap.value
 
@@ -526,7 +533,7 @@ class tBLMInterface(BaseGroupInterface):
             hg.length = self.l_hg2.value
 
         self._molgroup.fnSet(sigma=self.sigma.value,
-            bulknsld=bulknsld * 1e-6,
+            bulknsld=self.bulknsld.value * 1e-6,
             global_rough=self.substrate_rough.value,
             rho_substrate=self.rho_substrate.value * 1e-6,
             l_lipid1=self.l_lipid1.value,
@@ -568,9 +575,9 @@ class BoxInterface(MolgroupsInterface):
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.fnSet(volume=self.volume.value,
                              length=self.length.value,
                              position=self.z.value,
@@ -614,9 +621,9 @@ class ComponentBoxInterface(MolgroupsInterface):
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.fnSet(length=self.length.value,
                              position=self.z.value,
                              sigma=(self.sigma_bottom.value, self.sigma_top.value),
@@ -650,9 +657,9 @@ class VolumeFractionBoxInterface(MolgroupsInterface):
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.protexchratio = self.proton_exchange_efficiency.value
         self._molgroup.fnSet(volume_fraction=self.volume_fraction.value,
                              nSLD=(self.rhoH.value * 1e-6,
@@ -702,9 +709,9 @@ class BoxHermiteInterface(MolgroupsInterface):
 
         super().__post_init__()
 
-    def update(self, bulknsld: float) -> None:
+    def update(self) -> None:
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.fnSetRelative(dSpacing=self.dSpacing,
                                      dStart=self.startz.value,
                                      dDp=[d.value for d in self.Dp],
@@ -734,6 +741,10 @@ class BLMProteinComplexInterface(BaseGroupInterface):
         self._molgroup = BLMProteinComplex(blms=[blm._molgroup for blm in self.all_blms],
                                            proteins=[prot._molgroup for prot in self.proteins])
         
+        # tie together bulknsld parameters
+        for gp in self.all_blms + self.proteins:
+            gp.bulknsld = self.bulknsld
+
         # compile group names based on
         # BLMProteinComplex.fnWriteGroup2Dict
         _group_names = {}
@@ -761,10 +772,10 @@ class BLMProteinComplexInterface(BaseGroupInterface):
     def all_blms(self) -> List[BLMInterface | ssBLMInterface | tBLMInterface]:
         return [self.base_blm] + self.blms if self.base_blm is not None else self.blms
 
-    def update(self, bulknsld: float) -> None:
+    def update(self) -> None:
 
         for gp in self.all_blms + self.proteins:
-            gp.update(bulknsld)
+            gp.update()
 
         self._molgroup.fnAdjustBLMs()
         self.normarea.value = self._molgroup.normarea
@@ -844,9 +855,9 @@ class PolymerMushroomInterface(MolgroupsInterface):
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.startz = self.startz.value
         self._molgroup.rho = self.rho.value * 1e-6
         self._molgroup.vf = self.grafting_density.value
@@ -883,16 +894,16 @@ class PolymerBrushInterface(MolgroupsInterface):
         self._molgroup = PolymerBrush(name=self.name)
 
         # protects against initial errors calculation self.rho
-        self._molgroup.fnSetBulknSLD(0.0)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value)
         self.rho.set_function(functools.partial(lambda self: sld_from_bulk(self.rhoH.value, self.rhoD.value, self._molgroup.bulknsld * 1e6, self.proton_exchange_efficiency.value), self))
         self.max_density.set_function(functools.partial(lambda gp: gp.fnGetMaxandHalfHeight()[2], self._molgroup))
         self.half_height_position.set_function(functools.partial(lambda gp: gp.fnGetMaxandHalfHeight()[1], self._molgroup))
 
         super().__post_init__()
         
-    def update(self, bulknsld: float):
+    def update(self):
 
-        self._molgroup.fnSetBulknSLD(bulknsld * 1e-6)
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
         self._molgroup.startz = self.startz.value
         self._molgroup.rho = self.rho.value * 1e-6
         self._molgroup.vf = self.volume_fraction.value

@@ -47,6 +47,10 @@ class MolgroupsLayer(Layer):
         self.magnetism = None
         self.contrast = contrast
 
+        if self.contrast is not None:
+            for gp in [self.base_group] + self.add_groups + self.overlay_groups:
+                gp.bulknsld = self.contrast.rho
+
         self._penalty = 0.0
 
     def update(self):
@@ -56,11 +60,11 @@ class MolgroupsLayer(Layer):
         # 0. update normarea_group
 
         # 1. update base_group (may be required twice if normarea_group is defined differently)
-        self.base_group.update(bulknsld=self.contrast.rho.value)
+        self.base_group.update()
         if self.normarea_group is None:
             normarea = self.base_group.normarea.value
         else:
-            self.normarea_group.update(bulknsld=self.contrast.rho.value)
+            self.normarea_group.update()
             if not hasattr(self.normarea_group, 'normarea'):
                 print(f'Warning: {self.normarea_group.name} does not have normarea and cannot be normarea_group. Ignoring.')
             else:
@@ -68,7 +72,7 @@ class MolgroupsLayer(Layer):
                 if hasattr(self.base_group._molgroup, 'fnSetNormarea') & (self.base_group != self.normarea_group):
                     self.base_group._molgroup.fnSetNormarea(normarea)                
                 self.base_group.normarea.value = normarea
-                self.base_group.update(bulknsld=self.contrast.rho.value)
+                self.base_group.update()
 
         # 2. apply normarea to all remaining objects
         for group in self.add_groups + self.overlay_groups:
@@ -78,7 +82,7 @@ class MolgroupsLayer(Layer):
         # 3. update all remaining objects
         for group in self.add_groups + self.overlay_groups:
             if group != self.normarea_group:
-                group.update(bulknsld=self.contrast.rho.value)
+                group.update()
 
     def profile(self, z):
 

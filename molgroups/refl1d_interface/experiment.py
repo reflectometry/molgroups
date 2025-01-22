@@ -1,11 +1,13 @@
 """Defines a Refl1D Experiment object with molgroups support"""
 
 from typing import List, Optional
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
+import copy
 import functools
 
 from refl1d.names import Experiment, Stack, SLD, MixedExperiment
 
+from .groups import MolgroupsInterface, ReferencePoint
 from .layers import MolgroupsStack, MolgroupsLayer
 from .plots import cvo_plot, cvo_uncertainty_plot, results_table
 
@@ -63,6 +65,23 @@ class MolgroupsMixedExperiment(MixedExperiment):
             for key, item in p._webview_plots.items():
                 self._webview_plots.update({f'{i}: {key}': item})
 
+def _copy_group(gp: MolgroupsInterface | None) -> MolgroupsInterface | None:
+    if gp is not None:
+        new_gp = copy.copy(gp)
+
+        # reset ID
+        new_gp._generate_id()
+
+        # reset ReferencePoints
+        for f in fields(new_gp):
+            if f.type == ReferencePoint:
+                setattr(new_gp, f.name, f.default_factory())
+
+        # run post init
+        new_gp.__post_init__()
+
+        return new_gp
+
 def make_samples(layer_template: MolgroupsLayer, substrate: Stack, contrasts: List[SLD]) -> List[MolgroupsStack]:
 
     """Create samples from combining a substrate stack with a molgroups layer
@@ -77,11 +96,30 @@ def make_samples(layer_template: MolgroupsLayer, substrate: Stack, contrasts: Li
     """
     samples = []
 
+    # find normarea group in template
+    normarea_id = layer_template.normarea_group.id if layer_template.normarea_group is not None else None
+    base_group = _copy_group(layer_template.base_group)
+    add_groups = [_copy_group(gp) for gp in layer_template.add_groups]
+    overlay_groups = [_copy_group(gp) for gp in layer_template.overlay_groups]
+
+    normarea_group = None
+    if normarea_id is not None:
+        agid = [ag.id for ag in layer_template.add_groups]
+        ogid = [og.id for og in layer_template.overlay_groups]
+        if layer_template.base_group.id == normarea_id:
+            normarea_group = base_group
+        elif normarea_id in agid:
+            normarea_group = add_groups[agid.index(normarea_id)]
+        elif normarea_id in ogid:
+            normarea_group = overlay_groups[ogid.index(normarea_id)]
+        else:
+            raise ValueError('normarea group not found!')
+
     for contrast in contrasts:
-        mollayer = MolgroupsLayer(base_group=layer_template.base_group,
-                                  normarea_group=layer_template.normarea_group,
-                                  add_groups=layer_template.add_groups,
-                                  overlay_groups=layer_template.overlay_groups,
+        mollayer = MolgroupsLayer(base_group=base_group,
+                                  normarea_group=normarea_group,
+                                  add_groups=add_groups,
+                                  overlay_groups=overlay_groups,
                                   contrast=contrast,
                                   thickness=layer_template.thickness,
                                   name=contrast.name + ' ' + layer_template.name)
