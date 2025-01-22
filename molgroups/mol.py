@@ -56,10 +56,10 @@ def pdbto8col(pdbfilename, datfilename, selection='all', center_of_mass=numpy.ar
     deut_header = ''
 
     for i in range(Nres):
-        resnum = molec.residues[i].resid
+        resnum = sel.residues[i].resid
         resnums.append(resnum)
-        rescoords.append(molec.residues[i].atoms.center_of_mass())
-        key = convert_aa_code(molec.residues[i].resname)
+        rescoords.append(sel.residues[i].atoms.center_of_mass())
+        key = convert_aa_code(sel.residues[i].resname)
         if resnum in deuterated_residues:
             resmol = Molecule(name='Dres', formula=aa[key].formula.replace(elements.H, elements.D),
                               cell_volume=aa[key].cell_volume)
