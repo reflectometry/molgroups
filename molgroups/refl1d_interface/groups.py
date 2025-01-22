@@ -426,7 +426,7 @@ class ssBLMInterface(BaseGroupInterface):
         dl_submembrane = 0.0 if self.l_submembrane.value > 0 else -self.l_submembrane.value
 
         for hg in self._molgroup.headgroups1:
-            hg.length = self.l_hg1.value + dl_submembrane
+            hg.length = self.l_hg1.value - dl_submembrane
 
         for hg in self._molgroup.headgroups2:
             hg.length = self.l_hg2.value
