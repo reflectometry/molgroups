@@ -423,8 +423,10 @@ class ssBLMInterface(BaseGroupInterface):
 
         self._molgroup.substrate.length = 2.0 * self.overlap.value
 
+        dl_submembrane = 0.0 if self.l_submembrane.value > 0 else -self.l_submembrane.value
+
         for hg in self._molgroup.headgroups1:
-            hg.length = self.l_hg1.value
+            hg.length = self.l_hg1.value + dl_submembrane
 
         for hg in self._molgroup.headgroups2:
             hg.length = self.l_hg2.value
@@ -437,7 +439,7 @@ class ssBLMInterface(BaseGroupInterface):
             l_lipid1=self.l_lipid1.value,
             l_lipid2=self.l_lipid2.value,
             l_siox=self.l_siox.value,
-            l_submembrane=self.l_submembrane.value,
+            l_submembrane=max(0, self.l_submembrane.value),
             vf_bilayer=self.vf_bilayer.value,
             nf_inner_lipids=[p.value for p in self.inner_lipid_nf],
             nf_outer_lipids=[p.value for p in self.outer_lipid_nf],
