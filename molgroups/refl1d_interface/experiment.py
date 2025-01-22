@@ -96,33 +96,26 @@ def make_samples(layer_template: MolgroupsLayer, substrate: Stack, contrasts: Li
     """
     samples = []
 
-    # find normarea group in template
     normarea_id = layer_template.normarea_group.id if layer_template.normarea_group is not None else None
-    base_group = _copy_group(layer_template.base_group)
-    add_groups = [_copy_group(gp) for gp in layer_template.add_groups]
-    overlay_groups = [_copy_group(gp) for gp in layer_template.overlay_groups]
 
-    normarea_group = None
+    # find which group is the normarea group
     if normarea_id is not None:
-        agid = [ag.id for ag in layer_template.add_groups]
-        ogid = [og.id for og in layer_template.overlay_groups]
-        if layer_template.base_group.id == normarea_id:
-            normarea_group = base_group
-        elif normarea_id in agid:
-            normarea_group = add_groups[agid.index(normarea_id)]
-        elif normarea_id in ogid:
-            normarea_group = overlay_groups[ogid.index(normarea_id)]
-        else:
-            raise ValueError('normarea group not found!')
+        all_groups = [layer_template.base_group] + layer_template.add_groups + layer_template.overlay_groups
+        normarea_index = [gp.id for gp in all_groups].index(normarea_id)
 
     for contrast in contrasts:
-        mollayer = MolgroupsLayer(base_group=base_group,
-                                  normarea_group=normarea_group,
-                                  add_groups=add_groups,
-                                  overlay_groups=overlay_groups,
+        mollayer = MolgroupsLayer(base_group=_copy_group(layer_template.base_group),
+                                  add_groups=[_copy_group(gp) for gp in layer_template.add_groups],
+                                  overlay_groups=[_copy_group(gp) for gp in layer_template.overlay_groups],
                                   contrast=contrast,
                                   thickness=layer_template.thickness,
                                   name=contrast.name + ' ' + layer_template.name)
+        
+        # apply normarea group if applicable
+        if normarea_id is not None:
+            all_groups = [mollayer.base_group] + mollayer.add_groups + mollayer.overlay_groups
+            mollayer.normarea_group = all_groups[normarea_index]
+        
         samples.append(MolgroupsStack(substrate=substrate,
                                       molgroups_layer=mollayer,
                                       name=mollayer.name))
