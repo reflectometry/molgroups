@@ -73,9 +73,9 @@ def _copy_group(gp: MolgroupsInterface | None) -> MolgroupsInterface | None:
         new_gp._generate_id()
 
         # reset ReferencePoints
-        for f in fields(new_gp):
-            if f.type == ReferencePoint:
-                setattr(new_gp, f.name, f.default_factory())
+        #for f in fields(new_gp):
+        #    if f.type == ReferencePoint:
+        #        setattr(new_gp, f.name, f.default_factory())
 
         # run post init
         new_gp.__post_init__()
@@ -103,14 +103,30 @@ def make_samples(layer_template: MolgroupsLayer, substrate: Stack, contrasts: Li
         all_groups = [layer_template.base_group] + layer_template.add_groups + layer_template.overlay_groups
         normarea_index = [gp.id for gp in all_groups].index(normarea_id)
 
-    for contrast in contrasts:
-        mollayer = MolgroupsLayer(base_group=_copy_group(layer_template.base_group),
-                                  add_groups=[_copy_group(gp) for gp in layer_template.add_groups],
-                                  overlay_groups=[_copy_group(gp) for gp in layer_template.overlay_groups],
-                                  contrast=contrast,
-                                  thickness=layer_template.thickness,
-                                  name=contrast.name + ' ' + layer_template.name)
-        
+    for k, contrast in enumerate(contrasts):
+        if k == 0:
+            mollayer = MolgroupsLayer(base_group=layer_template.base_group,
+                                    add_groups=layer_template.add_groups,
+                                    overlay_groups=layer_template.overlay_groups,
+                                    contrast=contrast,
+                                    thickness=layer_template.thickness,
+                                    name=contrast.name + ' ' + layer_template.name)
+
+            all_groups0 = [mollayer.base_group] + mollayer.add_groups + mollayer.overlay_groups
+
+        else:
+            mollayer = MolgroupsLayer(base_group=_copy_group(layer_template.base_group),
+                                    add_groups=[_copy_group(gp) for gp in layer_template.add_groups],
+                                    overlay_groups=[_copy_group(gp) for gp in layer_template.overlay_groups],
+                                    contrast=contrast,
+                                    thickness=layer_template.thickness,
+                                    name=contrast.name + ' ' + layer_template.name)
+            
+            for gp0, gp in zip(all_groups0, [mollayer.base_group] + mollayer.add_groups + mollayer.overlay_groups):
+                for f in fields(gp0):
+                    if f.type == ReferencePoint:
+                        setattr(gp, f.name, getattr(gp0, f.name))
+
         # apply normarea group if applicable
         if normarea_id is not None:
             all_groups = [mollayer.base_group] + mollayer.add_groups + mollayer.overlay_groups
