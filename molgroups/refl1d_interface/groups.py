@@ -776,9 +776,9 @@ class BLMProteinComplexInterface(BaseGroupInterface):
 
         for gp in self.all_blms + self.proteins:
             gp.update()
-
+        
+        self.normarea.value = self.base_blm.normarea.value
         self._molgroup.fnAdjustBLMs()
-        self.normarea.value = self._molgroup.normarea
 
     def store_profile(self, z: np.ndarray) -> Dict:
         # special profile storage that takes into account excess density.
