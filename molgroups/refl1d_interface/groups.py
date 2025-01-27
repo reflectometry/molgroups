@@ -775,6 +775,7 @@ class BLMProteinComplexInterface(BaseGroupInterface):
     def update(self) -> None:
 
         for gp in self.all_blms + self.proteins:
+            gp.bulknsld = self.bulknsld
             gp.update()
         
         self.normarea.value = self.base_blm.normarea.value
