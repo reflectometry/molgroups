@@ -14,14 +14,11 @@ from scipy.integrate import trapezoid
 from refl1d.names import Parameter
 from bumps.parameter import Calculation
 
-from molgroups.mol import (nSLDObj, BLM, ssBLM, tBLM, Monolayer, Box2Err,
-                           BoxHermite, BLMProteinComplex, ProteinBox,
-                           ComponentBox, PolymerMushroom, PolymerBrush)
+import molgroups.mol as mol
+
 from molgroups.components import Component, Lipid, Tether, bme
 
 from periodictable.fasta import H2O_SLD, D2O_SLD
-
-_T = TypeVar("_T")
 
 def sld_from_bulk(rhoH: float, rhoD: float, bulknsld: float, protexchratio: float = 1.0) -> float:
     """Calculates scattering length density of material with
@@ -64,7 +61,7 @@ class MolgroupsInterface:
     name: str | None = None
     nf: Parameter = field(default_factory=lambda: Parameter(name='number fraction', value=1))
     bulknsld: Parameter = field(default_factory=lambda: Parameter(name='solvent rho', value=0.0))
-    _molgroup: nSLDObj | None = None
+    _molgroup: mol.nSLDObj | None = None
     _stored_profile: dict | None = None
     _group_names: dict[str, List[str]] = field(default_factory=dict)
 
@@ -188,11 +185,11 @@ class MolgroupsInterface:
         return trapezoid(area * z, z) / trapezoid(area, z) if np.sum(area) else 0.0
 
 @dataclass
-class BLMInterface(MolgroupsInterface):
+class Bilayer(MolgroupsInterface):
     """Refl1D interactor for free floating BLM
     """
 
-    _molgroup: BLM | None = None
+    _molgroup: mol.BLM | None = None
     xray_wavelength: float | None = None
 
     lipids: List[Lipid] = field(default_factory=list)
@@ -216,12 +213,12 @@ class BLMInterface(MolgroupsInterface):
     outer_headgroup_top: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_top', description='top of outer headgroups'))
 
     def __post_init__(self):
-        self._molgroup = BLM(inner_lipids=self.lipids,
-                             outer_lipids=self.lipids,
-                             inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
-                             outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
-                             xray_wavelength=self.xray_wavelength,
-                             name=self.name)
+        self._molgroup = mol.BLM(inner_lipids=self.lipids,
+                                 outer_lipids=self.lipids,
+                                 inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
+                                 outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
+                                 xray_wavelength=self.xray_wavelength,
+                                 name=self.name)
 
         n_lipids = len(self.lipids)
         self._group_names = {f'{self.name} inner headgroups': [f'{self.name}.headgroup1_{i}' for i in range(1, n_lipids + 1)],
@@ -262,11 +259,11 @@ class BLMInterface(MolgroupsInterface):
         self.normarea.value = self._molgroup.normarea
 
 @dataclass
-class MonolayerInterface(MolgroupsInterface):
+class Monolayer(MolgroupsInterface):
     """Refl1D interactor for free floating BLM
     """
 
-    _molgroup: Monolayer | None = None
+    _molgroup: mol.Monolayer | None = None
     xray_wavelength: float | None = None
 
     lipids: List[Lipid] = field(default_factory=list)
@@ -284,7 +281,7 @@ class MonolayerInterface(MolgroupsInterface):
     headgroup_top: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_top', description='top of outer headgroups'))
 
     def __post_init__(self):
-        self._molgroup = Monolayer(lipids=self.lipids,
+        self._molgroup = mol.Monolayer(lipids=self.lipids,
                                    lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.lipid_nf],
                                    xray_wavelength=self.xray_wavelength,
                                    name=self.name)
@@ -336,11 +333,11 @@ class BaseGroupInterface(MolgroupsInterface):
         super().__post_init__()
 
 @dataclass
-class SubstrateInterface(BaseGroupInterface):
+class Substrate(BaseGroupInterface):
     """Refl1D interface for Box2Err, specifically when used as a base group
     """
 
-    _molgroup: Box2Err | None = None
+    _molgroup: mol.Box2Err | None = None
 
     rho: Parameter = field(default_factory=lambda: Parameter(name='rho substrate', value=2.07))
     sigma: Parameter = field(default_factory=lambda: Parameter(name='substrate roughness', value=2.07))
@@ -348,7 +345,7 @@ class SubstrateInterface(BaseGroupInterface):
     substrate_surface: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='substrate_surface', description='surface of substrate'))
 
     def __post_init__(self) -> None:
-        self._molgroup = Box2Err(name=self.name)
+        self._molgroup = mol.Box2Err(name=self.name)
 
         self.substrate_surface.set_function(functools.partial(lambda box: box.z + 0.5 * box.length, self._molgroup))
 
@@ -364,11 +361,11 @@ class SubstrateInterface(BaseGroupInterface):
                              nSL=self.normarea.value * self.overlap.value * 2.0 * self.rho.value * 1e-6)
 
 @dataclass
-class ssBLMInterface(BaseGroupInterface):
+class SolidSupportedBilayer(BaseGroupInterface):
     """Refl1D interactor for ssBLM class
     """
 
-    _molgroup: ssBLM | None = None
+    _molgroup: mol.ssBLM | None = None
     xray_wavelength: float | None = None
 
     lipids: List[Lipid] = field(default_factory=list)
@@ -397,7 +394,7 @@ class ssBLMInterface(BaseGroupInterface):
     outer_headgroup_top: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_top', description='top of outer headgroups'))
 
     def __post_init__(self):
-        self._molgroup = ssBLM(inner_lipids=self.lipids,
+        self._molgroup = mol.ssBLM(inner_lipids=self.lipids,
                                outer_lipids=self.lipids,
                              inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
                              outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
@@ -455,11 +452,11 @@ class ssBLMInterface(BaseGroupInterface):
         self.normarea.value = self._molgroup.normarea
 
 @dataclass
-class tBLMInterface(BaseGroupInterface):
+class TetheredBilayer(BaseGroupInterface):
     """Refl1D interactor for ssBLM class
     """
 
-    _molgroup: tBLM | None = None
+    _molgroup: mol.tBLM | None = None
     xray_wavelength: float | None = None
 
     tether: Tether = field(default_factory=Tether)
@@ -490,7 +487,7 @@ class tBLMInterface(BaseGroupInterface):
     outer_headgroup_top: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_top', description='top of outer headgroups'))
 
     def __post_init__(self):
-        self._molgroup = tBLM(tether=self.tether,
+        self._molgroup = mol.tBLM(tether=self.tether,
                               filler=self.filler,
                               inner_lipids=self.lipids,
                               outer_lipids=self.lipids,
@@ -550,11 +547,11 @@ class tBLMInterface(BaseGroupInterface):
 
 # ============= Box-type objects ===============
 @dataclass
-class BoxInterface(MolgroupsInterface):
+class VolumeBox(MolgroupsInterface):
     """Refl1D interface for Box2Err
     """
 
-    _molgroup: Box2Err | None = None
+    _molgroup: mol.Box2Err | None = None
 
     z: Parameter = field(default_factory=lambda: Parameter(name='center position', value=0))
     rhoH: Parameter = field(default_factory=lambda: Parameter(name='rho in H2O', value=2.07))
@@ -568,7 +565,7 @@ class BoxInterface(MolgroupsInterface):
     top_surface: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='bottom_surface', description='top of box'))
 
     def __post_init__(self) -> None:
-        self._molgroup = Box2Err(name=self.name)
+        self._molgroup = mol.Box2Err(name=self.name)
 
         self.bottom_surface.set_function(functools.partial(lambda box: box.z - 0.5 * box.length, self._molgroup))
         self.top_surface.set_function(functools.partial(lambda box: box.z + 0.5 * box.length, self._molgroup))
@@ -588,14 +585,14 @@ class BoxInterface(MolgroupsInterface):
                                   self.volume.value * self.rhoD.value * 1e-6))
 
 @dataclass
-class ComponentBoxInterface(MolgroupsInterface):
+class ComponentBox(MolgroupsInterface):
     """Refl1D interface for ComponentBox (material defined by a
         list of fixed volume and fixed nSLD components);
         adjust volume fraction using nf and normarea, e.g.
             `component_box.nf = volume_fraction / (component_box.volume / (component_box.length * normarea))`
     """
 
-    _molgroup: ComponentBox | None = None
+    _molgroup: mol.ComponentBox | None = None
     components: List[Component] = field(default_factory=list)
     diff_components: List[Component] = field(default_factory=list)
     xray_wavelength: float | None = None
@@ -610,7 +607,7 @@ class ComponentBoxInterface(MolgroupsInterface):
     volume: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='component_volume', description='sum of component volumes'))
 
     def __post_init__(self) -> None:
-        self._molgroup = ComponentBox(name=self.name,
+        self._molgroup = mol.ComponentBox(name=self.name,
                                       components=self.components,
                                       diffcomponents=self.diff_components,
                                       xray_wavelength=self.xray_wavelength)
@@ -630,12 +627,12 @@ class ComponentBoxInterface(MolgroupsInterface):
                              nf=self.nf.value)
 
 @dataclass
-class VolumeFractionBoxInterface(MolgroupsInterface):
+class VolumeFractionBox(MolgroupsInterface):
     """Refl1D interface for ProteinBox (H/D aware volume fraction box
         function)
     """
 
-    _molgroup: ProteinBox | None = None
+    _molgroup: mol.ProteinBox | None = None
 
     z: Parameter = field(default_factory=lambda: Parameter(name='center position', value=0))
     rhoH: Parameter = field(default_factory=lambda: Parameter(name='rho in H2O', value=2.07))
@@ -650,7 +647,7 @@ class VolumeFractionBoxInterface(MolgroupsInterface):
     top_surface: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='bottom_surface', description='top of box'))
 
     def __post_init__(self) -> None:
-        self._molgroup = ProteinBox(name=self.name)
+        self._molgroup = mol.ProteinBox(name=self.name)
 
         self.bottom_surface.set_function(functools.partial(lambda box: box.z - 0.5 * box.length, self._molgroup))
         self.top_surface.set_function(functools.partial(lambda box: box.z + 0.5 * box.length, self._molgroup))
@@ -671,18 +668,18 @@ class VolumeFractionBoxInterface(MolgroupsInterface):
                              nf=self.nf.value)
 
 @dataclass
-class TetheredBoxInterface(MolgroupsInterface):
+class TetheredBox(MolgroupsInterface):
     pass
 
 @dataclass
-class TetheredBoxDoubleInterface(MolgroupsInterface):
+class TetheredBoxDouble(MolgroupsInterface):
     pass
 
 # ============= Spline objects ================
 @dataclass
-class BoxHermiteInterface(MolgroupsInterface):
+class Freeform(MolgroupsInterface):
     
-    _molgroup: BoxHermite | None = None
+    _molgroup: mol.BoxHermite | None = None
 
     dSpacing: float = 15.0
     startz: Parameter = field(default_factory=lambda: Parameter(name='start position', value=20))
@@ -697,7 +694,7 @@ class BoxHermiteInterface(MolgroupsInterface):
     rho: ReferencePoint = field(default_factory=lambda: ReferencePoint(name=f'nSLD', description='H/D aware nSLD of spline'))
 
     def __post_init__(self):
-        self._molgroup = BoxHermite(name=self.name, n_box=21)
+        self._molgroup = mol.BoxHermite(name=self.name, n_box=21)
 
          # protects against initial errors calculation self.rho
         self._molgroup.fnSetBulknSLD(0.0)
@@ -728,17 +725,17 @@ class ContinuousEulerInterface(MolgroupsInterface):
 # ============= Complex objects ===============
 
 @dataclass
-class BLMProteinComplexInterface(BaseGroupInterface):
+class BilayerProteinComplex(BaseGroupInterface):
     
-    _molgroup: BLMProteinComplex | None = None
+    _molgroup: mol.BLMProteinComplex | None = None
 
-    base_blm: ssBLMInterface | tBLMInterface | None = None
-    blms: List[BLMInterface] = field(default_factory=list)
-    proteins: List[ComponentBoxInterface | VolumeFractionBoxInterface | BoxHermiteInterface] = field(default_factory=list)
+    base_blm: SolidSupportedBilayer | TetheredBilayer | None = None
+    blms: List[Bilayer] = field(default_factory=list)
+    proteins: List[ComponentBox | VolumeFractionBox | Freeform] = field(default_factory=list)
 
     def __post_init__(self) -> None:
 
-        self._molgroup = BLMProteinComplex(blms=[blm._molgroup for blm in self.all_blms],
+        self._molgroup = mol.BLMProteinComplex(blms=[blm._molgroup for blm in self.all_blms],
                                            proteins=[prot._molgroup for prot in self.proteins])
         
         # tie together bulknsld parameters
@@ -769,7 +766,7 @@ class BLMProteinComplexInterface(BaseGroupInterface):
         return pars
 
     @property
-    def all_blms(self) -> List[BLMInterface | ssBLMInterface | tBLMInterface]:
+    def all_blms(self) -> List[Bilayer | SolidSupportedBilayer | TetheredBilayer]:
         return [self.base_blm] + self.blms if self.base_blm is not None else self.blms
 
     def update(self) -> None:
@@ -821,12 +818,12 @@ class BLMProteinComplexInterface(BaseGroupInterface):
 # ============= Polymer objects ===============
 
 @dataclass
-class PolymerMushroomInterface(MolgroupsInterface):
+class PolymerMushroom(MolgroupsInterface):
     """Refl1D interface for PolymerMushroom (H/D aware polymer mushroom
         function). Intended for relatively low grafting densities (<<1)
     """
 
-    _molgroup: PolymerMushroom | None = None
+    _molgroup: mol.PolymerMushroom | None = None
 
 
     startz: Parameter = field(default_factory=lambda: Parameter(name='starting position', value=0))
@@ -845,7 +842,7 @@ class PolymerMushroomInterface(MolgroupsInterface):
     half_height_position: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='half_height_position', description='position of half density'))
 
     def __post_init__(self) -> None:
-        self._molgroup = PolymerMushroom(name=self.name)
+        self._molgroup = mol.PolymerMushroom(name=self.name)
         # protects against initial errors calculation self.rho
         self._molgroup.fnSetBulknSLD(0.0)
 
@@ -869,12 +866,12 @@ class PolymerMushroomInterface(MolgroupsInterface):
         self._molgroup.nf = self.nf.value
 
 @dataclass
-class PolymerBrushInterface(MolgroupsInterface):
+class PolymerBrush(MolgroupsInterface):
     """Refl1D interface for PolymerBrush (H/D aware parabolic polymer
         brush density). 
     """
 
-    _molgroup: PolymerBrush | None = None
+    _molgroup: mol.PolymerBrush | None = None
 
     startz: Parameter = field(default_factory=lambda: Parameter(name='starting position', value=0))
     rhoH: Parameter = field(default_factory=lambda: Parameter(name='rho in H2O', value=2.07))
@@ -892,7 +889,7 @@ class PolymerBrushInterface(MolgroupsInterface):
     half_height_position: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='half_height_position', description='position of half density'))
 
     def __post_init__(self) -> None:
-        self._molgroup = PolymerBrush(name=self.name)
+        self._molgroup = mol.PolymerBrush(name=self.name)
 
         # protects against initial errors calculation self.rho
         self._molgroup.fnSetBulknSLD(self.bulknsld.value)
