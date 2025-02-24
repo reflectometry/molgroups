@@ -49,7 +49,7 @@ class MolgroupsLayer(Layer):
 
         if self.contrast is not None:
             for gp in [self.base_group] + self.add_groups + self.overlay_groups:
-                gp.bulknsld = self.contrast.rho
+                gp._set_bulknsld(self.contrast.rho)
 
         self._penalty = 0.0
 

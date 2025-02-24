@@ -198,6 +198,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
         n_samples = points.shape[0]
     points = points[np.random.permutation(len(points) - 1)]
     points = points[-n_samples:-1]
+    #print('\n'.join(['%i\t%s' % a for a in enumerate(state.labels)]))
 
     mapper = MPMapper.start_mapper(problem)
     results = MPMapper.pool.map(_MP_calc_profile, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))

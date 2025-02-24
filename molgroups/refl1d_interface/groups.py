@@ -117,6 +117,10 @@ class MolgroupsInterface:
                     pars.update({f'{self.name} {f.name}{i}': p})
 
         return pars
+    
+    def _set_bulknsld(self, bulknsld: Parameter):
+        """Sets the bulknsld parameter. Allows subclassing for nested groups"""
+        self.bulknsld = bulknsld
 
     def update(self) -> None:
         """Updates the molecular group with current values of the parameters,
@@ -738,9 +742,7 @@ class BilayerProteinComplex(BaseGroupInterface):
         self._molgroup = mol.BLMProteinComplex(blms=[blm._molgroup for blm in self.all_blms],
                                            proteins=[prot._molgroup for prot in self.proteins])
         
-        # tie together bulknsld parameters
-        for gp in self.all_blms + self.proteins:
-            gp.bulknsld = self.bulknsld
+        self._set_bulknsld(self.bulknsld)
 
         # compile group names based on
         # BLMProteinComplex.fnWriteGroup2Dict
@@ -765,6 +767,11 @@ class BilayerProteinComplex(BaseGroupInterface):
             pars.update(gp._get_parameters())
         return pars
 
+    def _set_bulknsld(self, bulknsld):
+        super()._set_bulknsld(bulknsld)
+        for gp in self.all_blms + self.proteins:
+            gp._set_bulknsld(bulknsld)
+
     @property
     def all_blms(self) -> List[Bilayer | SolidSupportedBilayer | TetheredBilayer]:
         return [self.base_blm] + self.blms if self.base_blm is not None else self.blms
@@ -772,7 +779,6 @@ class BilayerProteinComplex(BaseGroupInterface):
     def update(self) -> None:
 
         for gp in self.all_blms + self.proteins:
-            gp.bulknsld = self.bulknsld
             gp.update()
         
         self.normarea.value = self.base_blm.normarea.value
