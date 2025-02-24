@@ -1,30 +1,48 @@
 import numpy
+from dataclasses import dataclass, field
 from periodictable.fasta import Molecule, xray_sld
 # in formulas, use H[1] for exchangeable hydrogens, then Molecule.sld, Molecule.Dsld
 # to get limiting slds, or Molecule.D2Osld(D2O_fraction=??) to get arbitrary D2O fraction.
 
-
+@dataclass(init=False)
 class Component(Molecule):
     # Subclasses Molecule to automatically store a component length for use later
-    # and calculate total neutron scattering lengths
-    def __init__(self, length=9.575, xray_wavelength=None, **kwargs):
-        super().__init__(**kwargs)
+    # and calculate total neutron scattering lengths. Use length=None for Molecule-like behavior
+
+    name: str | None = None
+    formula: str = ''
+    length: float | None = None
+    xray_wavelength: float | None = None
+    cell_volume: float | None = None
+    density: float | None = None
+    charge: int = 0
+
+    def __init__(self, name, formula, length=9.575, xray_wavelength=None, cell_volume=None, density=None, charge=0):
+        super().__init__(name, formula, cell_volume, density, charge)
         self.length = length
         self.nSLs = self.fnGetnSL(xray_wavelength)
+        self.density = self.formula.density
+        self.formula = str(self.formula)
 
     def fnGetnSL(self, xray_wavelength=None):
         if xray_wavelength is None:
             return numpy.array([self.sld * self.cell_volume * 1e-6, self.Dsld * self.cell_volume * 1e-6])
         else:
-            return numpy.array([xray_sld(self.formula, wavelength=xray_wavelength)[0] * self.cell_volume * 1e-6])
+            return numpy.array([xray_sld(self.formula, density=self.density, wavelength=xray_wavelength)[0] * self.cell_volume * 1e-6])
 
 
 # null components and molecules for use with bilayer species that do not have headgroups or methyls (e.g. cholesterol)
-null_molecule = Molecule(name=None, formula='', cell_volume=0.0)
+null_molecule = Component(name=None, formula='', cell_volume=0.0, length=None)
 null_component = Component(name=None, formula='', cell_volume=0.0, length=9.575)
 
+@dataclass(init=False)
+class Lipid:
 
-class Lipid(object):
+    headgroup: Component | None = None
+    tails: Component | list[Component] = field(default_factory=list)
+    methyls: Component | list[Component] = field(default_factory=list)
+    name: str | None = None
+
     def __init__(self, headgroup, tails, methyls, name=None):
         # hg = Component object with headgroup information or PC molgroups object
         # tails = List of component objects containing lipid tail information
@@ -32,47 +50,56 @@ class Lipid(object):
         #           that is copied to each tail; OR, None, which uses a null group with
         #           no volume (use with cholesterol). Use methyl=Dmethyl for CD3.
 
-        # tails section
-        n_tails = len(tails)
-        if not isinstance(tails, list):
-            tails = [tails]
-
-        tail_volume = sum([t.cell_volume for t in tails])
-        tail_formula = ' '.join([str(t.formula) for t in tails])
-        tail_length = sum([t.length for t in tails]) / n_tails
-        self.tails = Component(name='tails', formula=tail_formula, cell_volume=tail_volume, length=tail_length)
-
         # headgroup
         self.headgroup = headgroup if headgroup is not None else null_component
 
-        # Create methyl groups
-        if not isinstance(methyls, list):
-            methyls = [methyls]
-        if len(methyls) == 1:
-            methyls = n_tails * methyls
-        assert n_tails == len(methyls), 'Lipid tails and lipid methyl lists must have equal length, not %i and %i' \
-                                            % (len(tails), len(methyls))
+        # if reserialized
+        if isinstance(tails, Component) & isinstance(methyls, Component):
+            self.tails = tails
+            self.methyls = methyls
 
-        # Replace None with null molecule
-        methyls = [m if m is not None else null_component for m in methyls]
-        m_volume = sum([m.cell_volume for m in methyls])
-        m_formula = ' '.join([str(m.formula) for m in methyls])
-        m_length = sum([m.length for m in methyls]) / n_tails
-        self.methyls = Component(name='methyls', formula=m_formula, cell_volume=m_volume, length=m_length)
+        else:
+                # tails section
+            n_tails = len(tails)
+            if not isinstance(tails, list):
+                tails = [tails]
+
+            tail_volume = sum([t.cell_volume for t in tails])
+            tail_formula = ' '.join([str(t.formula) for t in tails])
+            tail_length = sum([t.length for t in tails]) / n_tails
+            self.tails = Component(name='tails', formula=tail_formula, cell_volume=tail_volume, length=tail_length)
+        
+            # Create methyl groups
+            if not isinstance(methyls, list):
+                methyls = [methyls]
+            if len(methyls) == 1:
+                methyls = n_tails * methyls
+            assert n_tails == len(methyls), 'Lipid tails and lipid methyl lists must have equal length, not %i and %i' \
+                                                % (len(tails), len(methyls))
+
+            # Replace None with null molecule
+            methyls = [m if m is not None else null_component for m in methyls]
+            m_volume = sum([m.cell_volume for m in methyls])
+            m_formula = ' '.join([str(m.formula) for m in methyls])
+            m_length = sum([m.length for m in methyls]) / n_tails
+            self.methyls = Component(name='methyls', formula=m_formula, cell_volume=m_volume, length=m_length)
 
         if name is not None:
             self.name = name
         else:
             self.name = ' + '.join([c.name for c in (tails + [self.headgroup]) if c.name is not None])
 
-
+dataclass(init=False)
 class Tether(Lipid):
     """Subclass of Lipid for use with tether molecules.
         Uses hg field for tether glycerol.
         Tether includes both volume from the surface-attachment group (e.g. thiol)
             and the length of the separating polymer"""
+    
+    tether: Component = field(default_factory=lambda: null_component)
+    tetherg: Component = field(default_factory=lambda: null_component)
 
-    def __init__(self, tether, tetherg, tails, methyls, name=None):
+    def __init__(self, tether=null_component, tetherg=null_component, headgroup=null_component, tails=[], methyls=[], name=None):
 
         super().__init__(name=name, headgroup=tetherg, tails=tails, methyls=methyls)
         self.tether = tether
@@ -90,10 +117,8 @@ def AddMolecules(component_list, length=None):
     total_formula = ' '.join([str(c.formula) for c in component_list])
     total_cell_volume = sum([c.cell_volume for c in component_list])
     total_name = ' + '.join([c.name for c in component_list])
-    if length is None:
-        return Molecule(name=total_name, formula=total_formula, cell_volume=total_cell_volume)
-    else:
-        return Component(name=total_name, formula=total_formula, cell_volume=total_cell_volume, length=length)
+
+    return Component(name=total_name, formula=total_formula, cell_volume=total_cell_volume, length=length)
 
 
 # PC headgroup pieces
@@ -138,12 +163,12 @@ dmethyl = Component(name='dmethyl', formula='CD3', cell_volume=98.8/2.0, length=
 Dmethyl = Component(name='Dmethyl', formula='CD3', cell_volume=98.8/2.0, length=11.0)
 
 # Tether components
-SAc = Molecule(name='thiol acetate', formula='C2H3OS', cell_volume=117.0)
-EO6 = Molecule(name='6x ethylene oxide', formula='(C2H4O)6', cell_volume=360.0)
-tetherg_ether = Molecule(name='tether glycerol ether', formula='C5H9O2', cell_volume=125.40)
+SAc = Component(name='thiol acetate', formula='C2H3OS', cell_volume=117.0)
+EO6 = Component(name='6x ethylene oxide', formula='(C2H4O)6', cell_volume=360.0)
+tetherg_ether = Component(name='tether glycerol ether', formula='C5H9O2', cell_volume=125.40)
 tetherg_ester = carbonyl_glycerol
-ethanoyl = Molecule(name='ethanoyl', formula='C2H5O', cell_volume=(117 - 25.75))
-thiol = Molecule(name='sulfur', formula='S', cell_volume=25.75)
+ethanoyl = Component(name='ethanoyl', formula='C2H5O', cell_volume=(117 - 25.75))
+thiol = Component(name='sulfur', formula='S', cell_volume=25.75)
 SEO6 = AddMolecules([thiol, EO6])
 SAcEO6 = AddMolecules([SAc, EO6])
 
