@@ -9,7 +9,7 @@ from scipy.signal import peak_widths
 import sys
 import warnings
 
-from refl1d.polymer import mushroom_math, smear
+from refl1d.sample.polymer import mushroom_math, smear
 
 from periodictable.fasta import Molecule, AMINO_ACID_CODES as aa
 from periodictable.core import default_table
@@ -2124,7 +2124,7 @@ class Hermite(nSLDObj):
             warnings.simplefilter("ignore")
             results = peak_widths(self.area, [pos], rel_height=0.5)
         rdict[cName]['peak position'] = self.zaxis[pos]
-        rdict[cName]['FWHM'] = results[0] * (self.zaxis[1] - self.zaxis[0])
+        rdict[cName]['FWHM'] = numpy.squeeze(results[0] * (self.zaxis[1] - self.zaxis[0]))
         rdict[cName]['COM'] = numpy.sum(self.area * self.zaxis) / numpy.sum(self.area) if numpy.sum(self.area) != 0 else 0
         rdict[cName]['INT'] = numpy.sum(self.area * numpy.gradient(self.zaxis))
         return rdict
@@ -2747,7 +2747,7 @@ class BLMProteinComplex(CompositenSLDObj):
 class PolymerMushroom(nSLDObj):
     """Polymer mushroom model (relatively low grafting density)
 
-        Uses refl1d.polymer.mushroom_math
+        Uses refl1d.sample.polymer.mushroom_math
     """
     def __init__(self, startz=0.0, rho=0.7e-6, vf=0.1, Rg=7.0, delta=1.0, normarea=1.0, sigma=2.0, name=None):
         super().__init__(name=name)
@@ -2765,7 +2765,7 @@ class PolymerMushroom(nSLDObj):
         v = numpy.zeros_like(z)
         x = (z - self.startz) / self.Rg
 
-        # protect against divide by zero error (from refl1d.polymer)
+        # protect against divide by zero error (from refl1d.sample.polymer)
         delta_thresh = 1e-10
 
         if abs(self.delta) > delta_thresh:
@@ -2782,7 +2782,17 @@ class PolymerMushroom(nSLDObj):
         self.sld = numpy.ones_like(self.area) * self.rho
 
         return self.area, self.sl, self.sld
-    
+
+    def fnGetMaxandHalfHeight(self):
+        if self.area is not None:
+            if sum(self.area) != 0.0:
+                maxpos = numpy.argmax(self.area)    
+                zmax = self.zaxis[maxpos]
+                zhalfheight = numpy.interp(0.5 * max(self.area), self.area[maxpos:][::-1], self.zaxis[maxpos:][::-1])
+                return zmax, zhalfheight, max(self.area)
+        
+        return self.startz, self.startz, 0.0
+
     def fnWriteResults2Dict(self, rdict, cName):
         rdict = super().fnWriteResults2Dict(rdict, cName)
         if cName not in rdict:
@@ -2790,19 +2800,36 @@ class PolymerMushroom(nSLDObj):
         vol = trapezoid(self.area, self.zaxis)
         rdict[cName]['INT'] = vol
         rdict[cName]['COM'] = trapezoid(self.area * self.zaxis, self.zaxis) / vol if vol != 0 else 0
-        rdict[cName]['max area'] = max(self.area)
-        maxpos = numpy.argmax(self.area)
+        zmax, zhalfheight, maxarea = self.fnGetMaxandHalfHeight()
+        rdict[cName]['max area'] = maxarea
         rdict[cName]['starting position'] = self.startz
-        rdict[cName]['position of maximum area'] = self.zaxis[maxpos]
-        rdict[cName]['position of half-height'] = numpy.interp(0.5 * max(self.area), self.area[maxpos:][::-1], self.zaxis[maxpos:][::-1])
-        rdict[cName]['distance to maximum area'] = rdict[cName]['position of maximum area'] - self.startz
-        rdict[cName]['distance to half-height'] = rdict[cName]['position of half-height'] - self.startz
+        rdict[cName]['position of maximum area'] = zmax
+        rdict[cName]['position of half-height'] = zhalfheight
+        rdict[cName]['distance to maximum area'] = zmax - self.startz
+        rdict[cName]['distance to half-height'] = zhalfheight - self.startz
         return rdict
+
+    def fnWriteGroup2Dict(self, rdict, cName, z):
+        rdict[cName] = {}
+        rdict[cName]['header'] = f"{self.__class__.__name__} {cName} startz {self.startz} sigma {self.sigma} " \
+                                 f"rho {self.rho} vf {self.vf} Rg {self.Rg} " \
+                                 f"delta {self.delta} normarea {self.normarea} nf {self.nf}"
+        rdict[cName]['startz'] = self.startz
+        rdict[cName]['sigma'] = self.sigma
+        rdict[cName]['rho'] = self.rho
+        rdict[cName]['vf'] = self.vf
+        rdict[cName]['Rg'] = self.Rg
+        rdict[cName]['delta'] = self.delta
+        rdict[cName]['normarea'] = self.normarea
+        rdict[cName]['nf'] = self.nf
+        rdict[cName] = self.fnWriteProfile2Dict(rdict[cName], z)
+        return rdict
+
 
 class PolymerBrush(nSLDObj):
     """Polymer brush model (parabolic profile)
     
-        Adapted from refl1d.polymer.PolymerBrush.profile
+        Adapted from refl1d.sample.polymer.PolymerBrush.profile
     """
     def __init__(self, startz=0.0, base_length=10, interface_length=10, thinning_power=1, rho=0.7e-6, vf=0.1, normarea=1.0, sigma=2.0, name=None):
         super().__init__(name=name)
@@ -2837,7 +2864,17 @@ class PolymerBrush(nSLDObj):
         self.sld = numpy.ones_like(self.area) * self.rho
 
         return self.area, self.sl, self.sld
-    
+
+    def fnGetMaxandHalfHeight(self):
+        if self.area is not None:
+            if sum(self.area) != 0.0:
+                maxpos = numpy.argmax(self.area)    
+                zmax = self.zaxis[maxpos]
+                zhalfheight = numpy.interp(0.5 * max(self.area), self.area[maxpos:][::-1], self.zaxis[maxpos:][::-1])
+                return zmax, zhalfheight, max(self.area)
+        
+        return self.startz, self.startz, 0.0
+
     def fnWriteResults2Dict(self, rdict, cName):
         rdict = super().fnWriteResults2Dict(rdict, cName)
         if cName not in rdict:
@@ -2845,9 +2882,28 @@ class PolymerBrush(nSLDObj):
         vol = trapezoid(self.area, self.zaxis)
         rdict[cName]['INT'] = vol
         rdict[cName]['COM'] = trapezoid(self.area * self.zaxis, self.zaxis) / vol if vol != 0 else 0
-        rdict[cName]['max area'] = max(self.area)
-        maxpos = numpy.argmax(self.area)
+        
+        _, zhalfheight, maxarea = self.fnGetMaxandHalfHeight()
+        rdict[cName]['max area'] = maxarea
         rdict[cName]['starting position'] = self.startz
-        rdict[cName]['position of half-height'] = numpy.interp(0.5 * max(self.area), self.area[maxpos:][::-1], self.zaxis[maxpos:][::-1])
-        rdict[cName]['distance to half-height'] = rdict[cName]['position of half-height'] - self.startz
+        rdict[cName]['position of half-height'] = zhalfheight
+        rdict[cName]['distance to half-height'] = zhalfheight - self.startz
+
+        return rdict
+    
+    def fnWriteGroup2Dict(self, rdict, cName, z):
+        rdict[cName] = {}
+        rdict[cName]['header'] = f"{self.__class__.__name__} {cName} startz {self.startz} sigma {self.sigma} " \
+                                 f"base_length {self.base_length} interface_length {self.interface_length} " \
+                                 f"thinning_power {self.thinning_power} vf {self.vf} normarea {self.normarea} nf {self.nf}"
+        rdict[cName]['startz'] = self.startz
+        rdict[cName]['sigma'] = self.sigma
+        rdict[cName]['rho'] = self.rho
+        rdict[cName]['vf'] = self.vf
+        rdict[cName]['base_length'] = self.base_length
+        rdict[cName]['interface_length'] = self.interface_length
+        rdict[cName]['thinning_power'] = self.thinning_power
+        rdict[cName]['normarea'] = self.normarea        
+        rdict[cName]['nf'] = self.nf
+        rdict[cName] = self.fnWriteProfile2Dict(rdict[cName], z)
         return rdict
