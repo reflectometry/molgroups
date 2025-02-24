@@ -1,6 +1,6 @@
 [project]
 name = "molgroups"
-version = "0.2.0"
+version = "0.2.0a1"
 description = "Molecular Modeling for Scattering Data Analysis"
 authors = [
     { name = "Frank Heinrich", email = "mail@frank-heinrich.net" },
@@ -39,4 +39,4 @@ requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["molgroups"]
+packages = ["molgroups", "molgroups.refl1d_interface"]
