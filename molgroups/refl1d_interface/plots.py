@@ -2,6 +2,8 @@
     Used with MolgroupsExperiment.register_webview_plot
 """
 
+import dill
+import multiprocessing
 import time
 import numpy as np
 import plotly.graph_objs as go
@@ -125,26 +127,18 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
                                 plotdata=fig)
 
 # =============== Uncertainty plot ================
+# adapted from refl1d.errors
+def _initialize_worker(shared_serialized_problem, model_index):
+    global _shared_problem
+    _shared_problem = dill.loads(np.asarray(shared_serialized_problem[:], dtype="uint8").tobytes())
 
-def _MP_calc_profile(problem_point_pair) -> Tuple[Dict, float]:
-    """ Calculate statitics profiles based on a sample draw, for use with
-        multiprocessing
+    global _model_index
+    _model_index = model_index
 
-        Adapted from bumps.mapper
-    """
+_shared_problem = None  # used by multiprocessing pool to hold problem
 
-    # given a problem, a model index, and a sample draw, calculate the profiles
-    problem_id, model_index, point = problem_point_pair
-    if problem_id != MPMapper.problem_id:
-        # Problem is pickled using dill when it is available
-        try:
-            import dill
-            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
-        except ImportError:
-            MPMapper.problem = MPMapper.namespace.problem
-        MPMapper.problem_id = problem_id
-
-    return _calc_profile(MPMapper.problem, model_index, point)
+def _worker_eval_point(point):
+    return _calc_profile(_shared_problem, _model_index, point)
 
 def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> Tuple[dict, float]:
 
@@ -164,15 +158,6 @@ def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray |
     normarea = layer.base_group._stored_profile['normarea']
 
     return imoldat, normarea
-
-def initialize(problem, model_index):
-    # this sets up a version of _eval_point
-    # with the problem argument pre-set on the workers
-
-    from functools import partial
-
-    global _calc_profile_parallel    
-    _calc_profile_parallel = partial(_calc_profile, problem, model_index)
 
 def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None, state: MCMCDraw | None = None, n_samples: int = 50):
 
@@ -209,18 +194,20 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     points = points[-n_samples:-1]
     #print('\n'.join(['%i\t%s' % a for a in enumerate(state.labels)]))
 
+    # set up a parallel calculation
     import concurrent.futures
 
     model_index = list(problem.models).index(model)
-    initialize(problem, model_index)
-    with concurrent.futures.ProcessPoolExecutor(
-        max_workers=None, initializer=initialize, initargs=(problem, model_index)
-    ) as executor:
-        results = executor.map(_calc_profile_parallel, points)
+    serialized_problem_array = np.frombuffer(dill.dumps(problem), dtype="uint8")
 
-    #mapper = MPMapper.start_mapper(problem)
-    #results = MPMapper.pool.map(_MP_calc_profile, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
-    #MPMapper.stop_mapper(mapper)
+    with multiprocessing.Manager() as manager:
+        shared_serialized_problem = manager.Array("B", serialized_problem_array)
+        #args = [(shared_serialized_problem, point) for point in points]
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index)
+        ) as executor:
+            results = executor.map(_worker_eval_point, points)
 
     for (imoldat, normarea) in results:
         for lbl, item in group_names.items():
