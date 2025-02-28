@@ -165,6 +165,15 @@ def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray |
 
     return imoldat, normarea
 
+def initialize(problem, model_index):
+    # this sets up a version of _eval_point
+    # with the problem argument pre-set on the workers
+
+    from functools import partial
+
+    global _calc_profile_parallel    
+    _calc_profile_parallel = partial(_calc_profile, problem, model_index)
+
 def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None, state: MCMCDraw | None = None, n_samples: int = 50):
 
     # TODO: allow groups to label some items as uncertainty groups and use the median or best for others
@@ -200,9 +209,18 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     points = points[-n_samples:-1]
     #print('\n'.join(['%i\t%s' % a for a in enumerate(state.labels)]))
 
-    mapper = MPMapper.start_mapper(problem)
-    results = MPMapper.pool.map(_MP_calc_profile, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
-    MPMapper.stop_mapper(mapper)
+    import concurrent.futures
+
+    model_index = list(problem.models).index(model)
+    initialize(problem, model_index)
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=None, initializer=initialize, initargs=(problem, model_index)
+    ) as executor:
+        results = executor.map(_calc_profile_parallel, points)
+
+    #mapper = MPMapper.start_mapper(problem)
+    #results = MPMapper.pool.map(_MP_calc_profile, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
+    #MPMapper.stop_mapper(mapper)
 
     for (imoldat, normarea) in results:
         for lbl, item in group_names.items():
