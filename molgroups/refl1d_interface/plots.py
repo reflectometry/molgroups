@@ -2,6 +2,8 @@
     Used with MolgroupsExperiment.register_webview_plot
 """
 
+import array
+import concurrent.futures
 import dill
 import multiprocessing
 import time
@@ -11,7 +13,6 @@ import plotly.graph_objs as go
 from typing import List, Dict, Tuple
 
 from bumps.dream.state import MCMCDraw
-from bumps.mapper import MPMapper
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from bumps.plotutil import form_quantiles
 from refl1d.names import FitProblem, Experiment
@@ -25,6 +26,7 @@ def hex_to_rgb(hex_string):
     b_hex = hex_string[5:7]
     return int(r_hex, 16), int(g_hex, 16), int(b_hex, 16)
 
+# =============== CVO plot ================
 def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None):
     # component volume occupancy plot
 
@@ -127,17 +129,18 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
                                 plotdata=fig)
 
 # =============== Uncertainty plot ================
-# adapted from refl1d.errors
+# parallelization code adapted from refl1d.errors
 def _initialize_worker(shared_serialized_problem, model_index):
+
     global _shared_problem
-    _shared_problem = dill.loads(np.asarray(shared_serialized_problem[:], dtype="uint8").tobytes())
+    _shared_problem = dill.loads(shared_serialized_problem[:])
 
     global _model_index
     _model_index = model_index
 
 _shared_problem = None  # used by multiprocessing pool to hold problem
 
-def _worker_eval_point(point):
+def _worker_eval_plot_point(point):
     return _calc_profile(_shared_problem, _model_index, point)
 
 def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> Tuple[dict, float]:
@@ -195,10 +198,8 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     #print('\n'.join(['%i\t%s' % a for a in enumerate(state.labels)]))
 
     # set up a parallel calculation
-    import concurrent.futures
-
     model_index = list(problem.models).index(model)
-    serialized_problem_array = np.frombuffer(dill.dumps(problem), dtype="uint8")
+    serialized_problem_array = array.array('B', dill.dumps(problem))
 
     with multiprocessing.Manager() as manager:
         shared_serialized_problem = manager.Array("B", serialized_problem_array)
@@ -207,7 +208,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
         with concurrent.futures.ProcessPoolExecutor(
             max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index)
         ) as executor:
-            results = executor.map(_worker_eval_point, points)
+            results = executor.map(_worker_eval_plot_point, points)
 
     for (imoldat, normarea) in results:
         for lbl, item in group_names.items():
@@ -332,26 +333,10 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                              plotdata=fig)
 
 # ============= Results table =============
+# parallelization code adapted from refl1d.errors
 
-def _MP_calc_stats(problem_point_pair) -> dict:
-    """ Calculate statitics table data based on a sample draw, for use with
-        multiprocessing
-
-        Adapted from bumps.mapper
-    """
-
-    # given a problem, a model index, and a sample draw, calculate the profiles
-    problem_id, model_index, point = problem_point_pair
-    if problem_id != MPMapper.problem_id:
-        # Problem is pickled using dill when it is available
-        try:
-            import dill
-            MPMapper.problem = dill.loads(MPMapper.namespace.pickled_problem)
-        except ImportError:
-            MPMapper.problem = MPMapper.namespace.problem
-        MPMapper.problem_id = problem_id
-
-    return _calc_stats(MPMapper.problem, model_index, point)
+def _worker_eval_table_point(point):
+    return _calc_stats(_shared_problem, _model_index, point)
 
 def _calc_stats(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> dict:
 
@@ -420,9 +405,18 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
     print('Starting statistical analysis...')
     init_time = time.time()
 
-    mapper = MPMapper.start_mapper(problem)
-    results = MPMapper.pool.map(_MP_calc_stats, ((MPMapper.problem_id, list(problem.models).index(model), pt) for pt in points))
-    MPMapper.stop_mapper(mapper)
+    # set up a parallel calculation
+    model_index = list(problem.models).index(model)
+    serialized_problem_array = array.array('B', dill.dumps(problem))
+
+    with multiprocessing.Manager() as manager:
+        shared_serialized_problem = manager.Array("B", serialized_problem_array)
+        #args = [(shared_serialized_problem, point) for point in points]
+
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index)
+        ) as executor:
+            results = executor.map(_worker_eval_table_point, points)
 
     # walk through keys and combine into lists
     combined_results = combine_results(results)
@@ -446,8 +440,3 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
 
     return CustomWebviewPlot(fig_type='table',
                              plotdata=csv_result)
-
-def test_table(model, problem):
-
-    return CustomWebviewPlot(fig_type='table',
-                             plotdata="hello,goodbye\n1,2")
