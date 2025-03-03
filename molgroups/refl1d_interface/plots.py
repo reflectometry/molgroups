@@ -2,7 +2,6 @@
     Used with MolgroupsExperiment.register_webview_plot
 """
 
-import array
 import concurrent.futures
 import dill
 import multiprocessing
@@ -199,10 +198,9 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
 
     # set up a parallel calculation
     model_index = list(problem.models).index(model)
-    serialized_problem_array = array.array('B', dill.dumps(problem))
 
     with multiprocessing.Manager() as manager:
-        shared_serialized_problem = manager.Array("B", serialized_problem_array)
+        shared_serialized_problem = manager.Array("B", dill.dumps(problem))
         #args = [(shared_serialized_problem, point) for point in points]
 
         with concurrent.futures.ProcessPoolExecutor(
@@ -407,10 +405,9 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
 
     # set up a parallel calculation
     model_index = list(problem.models).index(model)
-    serialized_problem_array = array.array('B', dill.dumps(problem))
 
     with multiprocessing.Manager() as manager:
-        shared_serialized_problem = manager.Array("B", serialized_problem_array)
+        shared_serialized_problem = manager.Array("B", dill.dumps(problem))
         #args = [(shared_serialized_problem, point) for point in points]
 
         with concurrent.futures.ProcessPoolExecutor(
