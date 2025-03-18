@@ -1126,6 +1126,7 @@ class BLM(CompositenSLDObj):
         rdict[cName]['thickness_inner_leaflet'] = self.l_ihc + self.l_im
         rdict[cName]['thickness_outer_leaflet'] = self.l_ohc + self.l_om
         rdict[cName]['thickness_total'] = self.l_ohc + self.l_om + self.l_ihc + self.l_im
+        rdict[cName]['roughness'] = self.sigma
 
         if self.normarea != 0:
             p2 = self.headgroups1[0].z - 0.5 * self.headgroups1[0].length
