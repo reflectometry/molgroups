@@ -14,6 +14,7 @@ DLPG = cmp.Lipid(name='DLPG', headgroup=cmp.pg, tails=2 * [cmp.lauroyl], methyls
 DMPC = cmp.Lipid(name='DMPC', headgroup=PC, tails=2 * [cmp.myristoyl], methyls=[cmp.dmethyl])
 d54DMPC = cmp.Lipid(name='d54DMPC', headgroup=PC, tails=2 * [cmp.d_myristoyl], methyls=[cmp.dmethyl])
 DOPC = cmp.Lipid(name='DOPC', headgroup=PC, tails=2 * [cmp.oleoyl], methyls=[cmp.methyl])
+DOPG = cmp.Lipid(name='DOPG', headgroup=cmp.pg, tails=2 * [cmp.oleoyl], methyls=[cmp.methyl])
 DOPS = cmp.Lipid(name='DOPS', headgroup=cmp.ps, tails=2 * [cmp.oleoyl], methyls=[cmp.methyl])
 DOPE = cmp.Lipid(name='DOPE', headgroup=cmp.pe, tails=2 * [cmp.oleoyl], methyls=[cmp.methyl])
 DOTAP = cmp.Lipid(name='DOTAP', headgroup=cmp.tap, tails=2 * [cmp.oleoyl], methyls=[cmp.methyl])
