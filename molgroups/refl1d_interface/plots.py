@@ -431,7 +431,7 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
         #args = [(shared_serialized_problem, point) for point in points]
 
         with concurrent.futures.ProcessPoolExecutor(
-            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index)
+            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index, layer.name)
         ) as executor:
             results = executor.map(_worker_eval_table_point, points)
 
