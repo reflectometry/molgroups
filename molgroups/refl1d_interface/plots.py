@@ -129,10 +129,13 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
 
 # =============== Uncertainty plot ================
 # parallelization code adapted from refl1d.errors
-def _initialize_worker(shared_serialized_problem, model_index):
+def _initialize_worker(shared_serialized_problem, model_index, layer_name):
 
     global _shared_problem
     _shared_problem = dill.loads(shared_serialized_problem[:])
+
+    global _layer_name
+    _layer_name = layer_name
 
     global _model_index
     _model_index = model_index
@@ -140,15 +143,22 @@ def _initialize_worker(shared_serialized_problem, model_index):
 _shared_problem = None  # used by multiprocessing pool to hold problem
 
 def _worker_eval_plot_point(point):
-    return _calc_profile(_shared_problem, _model_index, point)
+    return _calc_profile(_shared_problem, _model_index, _layer_name, point)
 
-def _calc_profile(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> Tuple[dict, float]:
+def _calc_profile(problem: FitProblem | None, model_index: int, layer_name: str, pt: np.ndarray | list) -> Tuple[dict, float]:
 
     problem.setp(pt)
     model: Experiment = list(problem.models)[model_index]
     model.update()
     model.nllf()
-    layer = model.sample.molgroups_layer
+    if hasattr(model, 'parts'):
+        for p in model.parts:
+            if hasattr(p.sample, 'molgroups_layer'):
+                if p.sample.molgroups_layer.name == layer_name:
+                    layer = p.sample.molgroups_layer
+                    break
+    else:
+        layer = model.sample.molgroups_layer
     imoldat = {}
     for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
         for k, v in group._group_names.items():
@@ -204,7 +214,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
         #args = [(shared_serialized_problem, point) for point in points]
 
         with concurrent.futures.ProcessPoolExecutor(
-            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index)
+            max_workers=None, initializer=_initialize_worker, initargs=(shared_serialized_problem, model_index, layer.name)
         ) as executor:
             results = executor.map(_worker_eval_plot_point, points)
 
@@ -334,15 +344,25 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
 # parallelization code adapted from refl1d.errors
 
 def _worker_eval_table_point(point):
-    return _calc_stats(_shared_problem, _model_index, point)
+    return _calc_stats(_shared_problem, _model_index, _layer_name, point)
 
-def _calc_stats(problem: FitProblem | None, model_index: int, pt: np.ndarray | list) -> dict:
+def _calc_stats(problem: FitProblem | None, model_index: int, layer_name: str, pt: np.ndarray | list) -> dict:
 
     problem.setp(pt)
     model: Experiment = list(problem.models)[model_index]
     model.update()
     model.nllf()
-    layer: MolgroupsLayer = model.sample.molgroups_layer
+    if hasattr(model, 'parts'):
+        layer = None
+        for p in model.parts:
+            if hasattr(p.sample, 'molgroups_layer'):
+                if p.sample.molgroups_layer.name == layer_name:
+                    layer: MolgroupsLayer = p.sample.molgroups_layer
+                    break
+        if layer is None:
+            raise ValueError(f'No molgroups layer found with name {layer_name}')
+    else:
+        layer: MolgroupsLayer = model.sample.molgroups_layer
     iresults = {'parameters': {k: v for k, v in zip(problem.labels(), pt)}}
     for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
         iresults = group._molgroup.fnWriteResults2Dict(iresults, group.name)
