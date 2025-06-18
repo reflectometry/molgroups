@@ -298,7 +298,7 @@ class nSLDObj:
             overmax = temparea > dMaxArea
             # note: unphysical overfill will trigger the following assertion error
             # TODO: implement a correction instead of throwing an error
-            #assert (not numpy.any((temparea - dMaxArea) > area1))
+            # assert (not numpy.any((temparea - dMaxArea) > area1))
             nsl1[overmax] = nsl1[overmax] * (1 - ((temparea[overmax] - dMaxArea) / area1[overmax])) + nsl2[overmax]
             area1[overmax] = dMaxArea
 
@@ -1128,10 +1128,13 @@ class BLM(CompositenSLDObj):
         rdict[cName]['thickness_total'] = self.l_ohc + self.l_om + self.l_ihc + self.l_im
         rdict[cName]['roughness'] = self.sigma
 
-        inner_normarea = self.V_ihc / self.l_ihc
-        inner_mass = sum((lipid.headgroup.mass + lipid.tails.mass + lipid.methyls.mass) * nf_lipid for (lipid, nf_lipid) in zip(self.inner_lipids, self.inner_lipid_nf))
-        outer_mass = sum((lipid.headgroup.mass + lipid.tails.mass + lipid.methyls.mass) * nf_lipid for (lipid, nf_lipid) in zip(self.outer_lipids, self.outer_lipid_nf))
-        rdict[cName]['mass per area (ng/cm2)'] = ((inner_mass / inner_normarea) + outer_mass / self.normarea) * self.vf_bilayer * self.nf * 1.66e-24 * 1e16 * 1e9
+        # Code taken out for the moment. It assumes that all possible instances of headgroups, tails, and methyls
+        # have a mass attribute, which they do not necessarily have. For that to work a mass attribute needs to be
+        # consistently implemented across all molgroups objects starting with nSLDObj. (F.H.)
+        # inner_normarea = self.V_ihc / self.l_ihc
+        # inner_mass = sum((lipid.headgroup.mass + lipid.tails.mass + lipid.methyls.mass) * nf_lipid for (lipid, nf_lipid) in zip(self.inner_lipids, self.inner_lipid_nf))
+        # outer_mass = sum((lipid.headgroup.mass + lipid.tails.mass + lipid.methyls.mass) * nf_lipid for (lipid, nf_lipid) in zip(self.outer_lipids, self.outer_lipid_nf))
+        # rdict[cName]['mass per area (ng/cm2)'] = ((inner_mass / inner_normarea) + outer_mass / self.normarea) * self.vf_bilayer * self.nf * 1.66e-24 * 1e16 * 1e9
 
         if self.normarea != 0:
             p2 = self.headgroups1[0].z - 0.5 * self.headgroups1[0].length
