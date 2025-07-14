@@ -616,6 +616,8 @@ class CompositeHeadgroup(CompositenSLDObj):
         if not isinstance(components, (list, tuple)):
             components = [components]
 
+        self.mass = sum(c.mass for c in components)
+
         self.components = []
         for i, component in enumerate(components):
             comp_name = component.name
