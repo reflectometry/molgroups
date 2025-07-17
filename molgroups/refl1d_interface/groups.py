@@ -722,10 +722,41 @@ class Freeform(MolgroupsInterface):
                                      sigma=self.sigma.value)
         
 # ============= Euler objects =================
+@dataclass
+class ContinuousEuler(MolgroupsInterface):
+    
+    _molgroup: mol.ContinuousEuler | None = None
 
-class ContinuousEulerInterface(MolgroupsInterface):
-    pass
+    fn8col: str = ''
+    rotcenter: list = None
+    gamma: Parameter = field(default_factory=lambda: Parameter(name='gamma rotation', value=0))
+    beta: Parameter = field(default_factory=lambda: Parameter(name='beta rotation', value=0))
+    z: Parameter = field(default_factory=lambda: Parameter(name='z position', value=0))
+    sigma: Parameter = field(default_factory=lambda: Parameter(name='roughness', value=5))
 
+    center_of_volume: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='center of volume', description='center of volume'))
+
+    def __post_init__(self):
+        self._molgroup = mol.ContinuousEuler(name=self.name, fn8col=self.fn8col, rotcenter=self.rotcenter, xray=False)
+
+         # protects against initial errors calculation self.rho
+        self._molgroup.fnSetBulknSLD(0.0)
+
+        self._group_names = {f'{self.name}': [f'{self.name}']}
+
+        self.center_of_volume.set_function(self._center_of_volume)
+
+        super().__post_init__()
+
+    def update(self) -> None:
+
+        self._molgroup.fnSet(gamma=self.gamma.value,
+                             beta=self.beta.value,
+                             zpos=self.z.value,
+                             sigma=self.sigma.value,
+                             nf=self.nf.value,
+                             bulknsld=self.bulknsld.value * 1e-6)
+        
 # ============= Complex objects ===============
 
 @dataclass
