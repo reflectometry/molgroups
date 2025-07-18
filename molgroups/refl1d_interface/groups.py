@@ -733,6 +733,7 @@ class ContinuousEuler(MolgroupsInterface):
     beta: Parameter = field(default_factory=lambda: Parameter(name='beta rotation', value=0))
     z: Parameter = field(default_factory=lambda: Parameter(name='z position', value=0))
     sigma: Parameter = field(default_factory=lambda: Parameter(name='roughness', value=5))
+    proton_exchange_efficiency: Parameter = field(default_factory=lambda: Parameter(name='proton exchange efficiency', value=1.0))
 
     center_of_volume: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='center of volume', description='center of volume'))
 
@@ -750,6 +751,7 @@ class ContinuousEuler(MolgroupsInterface):
 
     def update(self) -> None:
 
+        self._molgroup.protexchratio = self.proton_exchange_efficiency.value
         self._molgroup.fnSet(gamma=self.gamma.value,
                              beta=self.beta.value,
                              zpos=self.z.value,
