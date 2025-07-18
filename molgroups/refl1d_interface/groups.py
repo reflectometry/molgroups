@@ -727,8 +727,8 @@ class ContinuousEuler(MolgroupsInterface):
     
     _molgroup: mol.ContinuousEuler | None = None
 
-    fn8col: str = ''
-    rotcenter: list = None
+    residue_data: list | np.ndarray = None
+    rotcenter: list | np.ndarray = None
     gamma: Parameter = field(default_factory=lambda: Parameter(name='gamma rotation', value=0))
     beta: Parameter = field(default_factory=lambda: Parameter(name='beta rotation', value=0))
     z: Parameter = field(default_factory=lambda: Parameter(name='z position', value=0))
@@ -738,7 +738,7 @@ class ContinuousEuler(MolgroupsInterface):
     center_of_volume: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='center of volume', description='center of volume'))
 
     def __post_init__(self):
-        self._molgroup = mol.ContinuousEuler(name=self.name, fn8col=self.fn8col, rotcenter=self.rotcenter, xray=False)
+        self._molgroup = mol.ContinuousEuler(name=self.name, fn8col=self.residue_data, rotcenter=self.rotcenter, xray=False)
 
          # protects against initial errors calculation self.rho
         self._molgroup.fnSetBulknSLD(0.0)
