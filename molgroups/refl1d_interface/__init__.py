@@ -17,4 +17,5 @@ from molgroups.refl1d_interface.groups import (Substrate,
                                                PolymerBrush,
                                                PolymerMushroom,
                                                Monolayer,
+                                               ContinuousEuler
                                                )
