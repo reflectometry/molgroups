@@ -2067,6 +2067,7 @@ class GradientBox(nSLDObj):
         self.fnWriteProfile2File(fp, cName, z)
 
     def fnWriteGroup2Dict(self, rdict, cName, z):
+        rdict[cName] = {}
         rdict[cName]['z'] = self.z
         rdict[cName]['sigma1'] = self.sigma1
         rdict[cName]['sigma2'] = self.sigma2
