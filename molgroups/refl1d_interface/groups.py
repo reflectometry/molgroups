@@ -706,7 +706,7 @@ class GradientBox(MolgroupsInterface):
                              vf1=self.volume_fraction_bottom.value,
                              vf2=self.volume_fraction_top.value,
                              length=self.length.value,
-                             z=self.z.value,
+                             position=self.z.value,
                              sigma=(self.sigma_bottom.value,
                                     self.sigma_top.value),
                              nf=self.nf.value)
