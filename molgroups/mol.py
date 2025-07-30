@@ -1920,6 +1920,174 @@ class TetheredBox(TetheredBoxDouble):
 
         return rdict
 
+class GradientBox(nSLDObj):
+    """Volume fraction box function with gradients in sigma and/or volume fraction"""
+    def __init__(self, dz=20, dsigma1=2, dsigma2=2, dlength=10, dvf1=0.1, dvf2=0.1, dnSLD1=1, dnSLD2=1, dnumberfraction=1, normarea=1, name=None):
+        super().__init__(name=name)
+        self.z = dz
+        self.sigma1 = dsigma1
+        self.sigma2 = dsigma2
+        self.length = dlength
+        self.init_l = dlength
+        self.vf1 = dvf1
+        self.vf2 = dvf2
+        self.sld1 = dnSLD1
+        self.sld2 = dnSLD2
+        self.nf = dnumberfraction
+        self.normarea = normarea
+        self._vol = 0
+        self._com = 0
+
+    def _smooth_gradient(self, z, y1, y2):
+
+        dz = z[1] - z[0]
+        m = (y2 - y1) / self.length
+        z1, z2 = self.z - 0.5 * self.length, self.z + 0.5 * self.length
+        b = y1 - m * z1
+
+        # fill in the bulk
+        crit = numpy.abs(z - self.z) < 0.5 * self.length
+        y = numpy.zeros_like(z)
+        y[crit] = m * z[crit] + b
+
+        # if edges are inside z, interpolate values
+        idxs = numpy.argwhere(crit)
+        if len(idxs):
+            if idxs[0] > 0:
+                y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z1 - z[idxs[0] - 1]) / dz
+            if idxs[-1] < len(z) - 1:
+                y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z[idxs[-1] + 1] - z2) / dz
+
+        crit_bottom = z < self.z
+        y[crit_bottom] = gaussian_filter(y[crit_bottom], self.sigma1 / dz, order=0, mode='constant', cval=0)
+        crit_top = z > self.z
+        y[crit_top] = gaussian_filter(y[crit_top], self.sigma2 / dz, order=0, mode='constant', cval=0)
+
+        return y
+
+    def fnGetProfiles(self, z):
+        # calculate area
+        # Gaussian function definition, integral is volume, return value is area at positions z
+
+        y1, y2 = self.vf1, self.vf2
+        dz = z[1] - z[0]
+        m = (y2 - y1) / self.length
+        z1, z2 = self.z - 0.5 * self.length, self.z + 0.5 * self.length
+        b = y1 - m * z1
+
+        # integrated volume and center of mass
+        self._vol = 0.5 * (y2 + y1) * self.length * self.normarea * self.nf
+        self._com = (m / 3 * (z2 ** 3 - z1 ** 3) + b / 2 * (z2 ** 2 - z1 ** 2)) / self._vol
+
+        # fill in the bulk
+        crit = numpy.abs(z - self.z) < 0.5 * self.length
+        y = numpy.zeros_like(z)
+        y[crit] = m * z[crit] + b
+
+        # if edges are inside z, interpolate values
+        idxs = numpy.argwhere(crit)
+        if len(idxs):
+            if idxs[0] > 0:
+                y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z1 - z[idxs[0] - 1]) / dz
+            if idxs[-1] < len(z) - 1:
+                y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z[idxs[-1] + 1] - z2) / dz
+
+        if self.sigma1 > 0:
+            crit_bottom = z < self.z
+            y[crit_bottom] = gaussian_filter(y, self.sigma1 / dz, order=0, mode='constant', cval=0)[crit_bottom]
+
+        if self.sigma2 > 0:
+            crit_top = z > self.z
+            y[crit_top] = gaussian_filter(y, self.sigma2 / dz, order=0, mode='constant', cval=0)[crit_top]
+
+        area = self.normarea * self.nf * y
+
+        m = (self.sld2 - self.sld1) / self.length
+        b = self.sld1 - m * z1
+        nsld = m * z + b
+
+        nsl = area * nsld * numpy.gradient(z)
+
+        self.zaxis = z
+        self.area = area
+        self.sl = nsl
+        self.sld = nsld
+
+        return area, nsl, nsld
+
+    def fnGetnSLD(self, z):
+        _, _, nsld = self.fnGetProfiles(z)
+        return nsld
+
+    # Gaussians are cut off below and above 3 sigma double
+    def fnGetLowerLimit(self):
+        return self.z - 0.5 * self.length - 3 * self.sigma1
+
+    def fnGetUpperLimit(self):
+        return self.z + 0.5 * self.length + 3 * self.sigma2
+
+    def fnSetSigma(self, sigma1, sigma2=None):
+        self.sigma1 = sigma1
+        self.sigma2 = sigma1 if sigma2 is None else sigma2
+
+    def fnSetZ(self, dz):
+        self.z = dz
+
+    def fnSet(self, vf1=None, vf2=None, length=None, position=None, sigma=None, rho1=None, rho2=None, nf=None):
+        if vf1 is not None:
+            self.vf1 = vf1
+            if vf2 is None:
+                self.vf2 = vf1
+        if vf2 is not None:
+            self.vf2 = vf2
+        if rho1 is not None:
+            self.sld1 = rho1
+            if rho2 is None:
+                self.sld2 = rho1
+        if rho2 is not None:
+            self.sld2 = rho2
+        if length is not None:
+            self.length = length
+        if position is not None:
+            self.fnSetZ(position)
+        if sigma is not None:
+            sigma2 = None
+            if isinstance(sigma, (list, tuple, numpy.ndarray)):
+                sigma1 = sigma[0]
+                if len(sigma) == 2:
+                    sigma2 = sigma[1]
+            else:
+                sigma1 = sigma
+            self.fnSetSigma(sigma1, sigma2)
+        if nf is not None:
+            self.nf = nf
+
+    def fnWriteGroup2File(self, fp, cName, z):
+        # TODO: fill this out
+        self.fnWriteProfile2File(fp, cName, z)
+
+    def fnWriteGroup2Dict(self, rdict, cName, z):
+        rdict[cName]['z'] = self.z
+        rdict[cName]['sigma1'] = self.sigma1
+        rdict[cName]['sigma2'] = self.sigma2
+        rdict[cName]['l'] = self.length
+        rdict[cName]['vf1'] = self.vf1
+        rdict[cName]['vf2'] = self.vf2
+        rdict[cName]['sld1'] = self.sld1
+        rdict[cName]['sld2'] = self.sld2                
+        rdict[cName]['nf'] = self.nf
+        rdict[cName]['normarea'] = self.normarea
+        rdict[cName] = self.fnWriteProfile2Dict(rdict[cName], z)
+        return rdict
+
+    def fnWriteResults2Dict(self, rdict, cName):
+        rdict = super().fnWriteResults2Dict(rdict, cName)
+        if cName not in rdict:
+            rdict[cName] = {}
+        
+        rdict[cName]['COM'] = self._com
+        rdict[cName]['INT'] = self._vol
+        return rdict
 
 class Hermite(nSLDObj):
     """

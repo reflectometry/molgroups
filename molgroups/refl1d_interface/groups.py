@@ -672,6 +672,46 @@ class VolumeFractionBox(MolgroupsInterface):
                              nf=self.nf.value)
 
 @dataclass
+class GradientBox(MolgroupsInterface):
+    """Refl1D interface for GradientBox (Volume fraction box with gradients)
+    """
+
+    _molgroup: mol.GradientBox | None = None
+
+    z: Parameter = field(default_factory=lambda: Parameter(name='center position', value=0))
+    rho_bottom: Parameter = field(default_factory=lambda: Parameter(name='rho at bottom surface', value=2.07))
+    rho_top: Parameter = field(default_factory=lambda: Parameter(name='rho at top surface', value=2.07))
+    volume_fraction_bottom: Parameter = field(default_factory=lambda: Parameter(name='volume fraction at bottom surface', value=1))
+    volume_fraction_top: Parameter = field(default_factory=lambda: Parameter(name='volume fraction at top surface', value=1))
+    length: Parameter = field(default_factory=lambda: Parameter(name='length', value=10))
+    sigma_bottom: Parameter = field(default_factory=lambda: Parameter(name='roughness of bottom interface', value=2.5))
+    sigma_top: Parameter = field(default_factory=lambda: Parameter(name='roughness of top interface', value=2.5))
+
+    bottom_surface: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='bottom_surface', description='bottom of box'))
+    top_surface: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='bottom_surface', description='top of box'))
+
+    def __post_init__(self) -> None:
+        self._molgroup = mol.GradientBox(name=self.name)
+
+        self.bottom_surface.set_function(functools.partial(lambda box: box.z - 0.5 * box.length, self._molgroup))
+        self.top_surface.set_function(functools.partial(lambda box: box.z + 0.5 * box.length, self._molgroup))
+
+        super().__post_init__()
+        
+    def update(self):
+
+        self._molgroup.fnSetBulknSLD(self.bulknsld.value * 1e-6)
+        self._molgroup.fnSet(rho1=self.rho_bottom.value * 1e-6,
+                             rho2=self.rho_top.value * 1e-6,
+                             vf1=self.volume_fraction_bottom.value,
+                             vf2=self.volume_fraction_top.value,
+                             length=self.length.value,
+                             z=self.z.value,
+                             sigma=(self.sigma_bottom.value,
+                                    self.sigma_top.value),
+                             nf=self.nf.value)
+
+@dataclass
 class TetheredBox(MolgroupsInterface):
     pass
 
