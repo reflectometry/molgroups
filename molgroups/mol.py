@@ -1977,30 +1977,35 @@ class GradientBox(nSLDObj):
 
         # integrated volume and center of mass
         self._vol = 0.5 * (y2 + y1) * self.length * self.normarea * self.nf
-        self._com = (m / 3 * (z2 ** 3 - z1 ** 3) + b / 2 * (z2 ** 2 - z1 ** 2)) / self._vol
+        if self._vol:
+            self._com = (m / 3 * (z2 ** 3 - z1 ** 3) + b / 2 * (z2 ** 2 - z1 ** 2)) / self._vol
 
-        # fill in the bulk
-        crit = numpy.abs(z - self.z) < 0.5 * self.length
-        y = numpy.zeros_like(z)
-        y[crit] = m * z[crit] + b
+            # fill in the bulk
+            crit = numpy.abs(z - self.z) < 0.5 * self.length
+            y = numpy.zeros_like(z)
+            y[crit] = m * z[crit] + b
 
-        # if edges are inside z, interpolate values
-        idxs = numpy.argwhere(crit).T[0]
-        if len(idxs):
-            if idxs[0] > 0:
-                y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z[idxs[0]] - (z1 + 0.5 * dz)) / dz
-            if idxs[-1] < len(z) - 1:
-                y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z2 - (z[idxs[-1]] + 0.5 * dz)) / dz
+            # if edges are inside z, interpolate values
+            idxs = numpy.argwhere(crit).T[0]
+            if len(idxs):
+                if idxs[0] > 0:
+                    y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z[idxs[0]] - (z1 + 0.5 * dz)) / dz
+                if idxs[-1] < len(z) - 1:
+                    y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z2 - (z[idxs[-1]] + 0.5 * dz)) / dz
 
-        if self.sigma1 > 0:
-            crit_bottom = z < self.z
-            y[crit_bottom] = gaussian_filter(y, self.sigma1 / dz, order=0, mode='constant', cval=0)[crit_bottom]
+            if self.sigma1 > 0:
+                crit_bottom = z < self.z
+                y[crit_bottom] = gaussian_filter(y, self.sigma1 / dz, order=0, mode='constant', cval=0)[crit_bottom]
 
-        if self.sigma2 > 0:
-            crit_top = z > self.z
-            y[crit_top] = gaussian_filter(y[::-1], self.sigma2 / dz, order=0, mode='constant', cval=0)[::-1][crit_top]
+            if self.sigma2 > 0:
+                crit_top = z > self.z
+                y[crit_top] = gaussian_filter(y[::-1], self.sigma2 / dz, order=0, mode='constant', cval=0)[::-1][crit_top]
 
-        area = self.normarea * self.nf * y
+            area = self.normarea * self.nf * y
+        
+        else:
+
+            area = numpy.zeros_like(z)
 
         m = (self.sld2 - self.sld1) / self.length
         b = self.sld1 - m * z1
