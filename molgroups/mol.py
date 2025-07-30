@@ -1985,12 +1985,12 @@ class GradientBox(nSLDObj):
         y[crit] = m * z[crit] + b
 
         # if edges are inside z, interpolate values
-        idxs = numpy.argwhere(crit)
+        idxs = numpy.argwhere(crit).T[0]
         if len(idxs):
             if idxs[0] > 0:
-                y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z1 - z[idxs[0] - 1]) / dz
+                y[idxs[0] - 1] = (m * z[idxs[0] - 1] + b) * (z[idxs[0]] - (z1 + 0.5 * dz)) / dz
             if idxs[-1] < len(z) - 1:
-                y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z[idxs[-1] + 1] - z2) / dz
+                y[idxs[-1] + 1] = (m * z[idxs[-1] + 1] + b) * (z2 - (z[idxs[-1]] + 0.5 * dz)) / dz
 
         if self.sigma1 > 0:
             crit_bottom = z < self.z
@@ -1998,7 +1998,7 @@ class GradientBox(nSLDObj):
 
         if self.sigma2 > 0:
             crit_top = z > self.z
-            y[crit_top] = gaussian_filter(y, self.sigma2 / dz, order=0, mode='constant', cval=0)[crit_top]
+            y[crit_top] = gaussian_filter(y[::-1], self.sigma2 / dz, order=0, mode='constant', cval=0)[::-1][crit_top]
 
         area = self.normarea * self.nf * y
 
