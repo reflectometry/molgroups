@@ -3,15 +3,16 @@
 """
 
 import concurrent.futures
+import csv
 import dill
+import io
 import multiprocessing
 import time
 import numpy as np
 import plotly.graph_objs as go
 
-from typing import List, Dict, Tuple
-
 from bumps.dream.state import MCMCDraw
+from bumps.dream.stats import credible_interval
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from bumps.plotutil import form_quantiles
 from refl1d.names import FitProblem, Experiment
@@ -24,6 +25,16 @@ def hex_to_rgb(hex_string):
     g_hex = hex_string[3:5]
     b_hex = hex_string[5:7]
     return int(r_hex, 16), int(g_hex, 16), int(b_hex, 16)
+
+def exportdata_to_csv(export_data: dict) -> str:
+    # Write CSV data for export
+    with io.StringIO() as f:
+        writer = csv.DictWriter(f, fieldnames=export_data.keys())
+        writer.writeheader()
+        for i in range(len(export_data.get('z', []))):
+            writer.writerow({k: v[i] for k, v in export_data.items()})
+
+        return f.getvalue()
 
 # =============== CVO plot ================
 def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None):
@@ -51,6 +62,7 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
 
     fig = go.Figure()
     traces = []
+    export_data = {}
     MOD_COLORS = COLORS[1:]
     color_idx = 1
     sumarea = 0
@@ -64,6 +76,7 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
             else:
                 print(f'Warning: {gp} not found')
 
+        export_data.setdefault('z', zaxis)
         color = MOD_COLORS[color_idx % len(MOD_COLORS)]
         plotly_color = ','.join(map(str, hex_to_rgb(color)))
         traces.append(go.Scatter(x=zaxis,
@@ -72,6 +85,7 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
                                 mode='lines',
                                 name=lbl,
                                 line=dict(color=color)))
+        export_data[lbl] = area / normarea
         traces.append(go.Scatter(x=zaxis,
                                 y=area / normarea,
                                 legendgroup=lbl,
@@ -93,6 +107,7 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
                                 name='buffer',
                                 legendgroup='buffer',
                                 line=dict(color=color)))
+    export_data['buffer'] = sumarea/ normarea
     traces.append(go.Scatter(x=zaxis,
                                 y=sumarea / normarea,
                                 mode='lines',
@@ -125,7 +140,8 @@ def cvo_plot(layer: MolgroupsLayer, model: Experiment | None = None, problem: Fi
     )
 
     return CustomWebviewPlot(fig_type='plotly',
-                                plotdata=fig)
+                                plotdata=fig,
+                                exportdata=exportdata_to_csv(export_data))
 
 # =============== Uncertainty plot ================
 # parallelization code adapted from refl1d.errors
@@ -145,7 +161,7 @@ _shared_problem = None  # used by multiprocessing pool to hold problem
 def _worker_eval_plot_point(point):
     return _calc_profile(_shared_problem, _model_index, _layer_name, point)
 
-def _calc_profile(problem: FitProblem | None, model_index: int, layer_name: str, pt: np.ndarray | list) -> Tuple[dict, float]:
+def _calc_profile(problem: FitProblem | None, model_index: int, layer_name: str, pt: np.ndarray | list) -> tuple[dict, float]:
 
     problem.setp(pt)
     model: Experiment = list(problem.models)[model_index]
@@ -230,6 +246,8 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
         statnormarea.append(normarea)
     print(f'CVO uncertainty calculation done after {time.time() - init_time} seconds')
 
+    export_data = {'z': zaxis}
+
     for lbl, statlist in statdata.items():
         color = MOD_COLORS[color_idx % len(MOD_COLORS)]
         plotly_color = ','.join(map(str, hex_to_rgb(color)))
@@ -248,6 +266,8 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                                     fillcolor=f'rgba({plotly_color},0.3)',
                                     showlegend=False
                                     ))
+            export_data[lbl + ' lower 68p CI'] = lo
+            export_data[lbl + ' upper 68p CI'] = hi
             uncertainty_traces.append(go.Scatter(x=zaxis,
                                     y=hi, # * med_norm_area / normarea,
                                     showlegend=False,
@@ -263,6 +283,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                             name=lbl,
                             legendgroup=lbl,
                             line=dict(color=color)))
+        export_data[lbl] = med_area
 
         color_idx += 1
         sumarea += med_area * med_norm_area
@@ -306,6 +327,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                                 name='buffer',
                                 legendgroup='buffer',
                                 line=dict(color=color)))
+    export_data['buffer'] = sumarea / med_norm_area
     buffer_traces.append(go.Scatter(x=zaxis,
                                 y=sumarea / med_norm_area,
                                 mode='lines',
@@ -338,7 +360,8 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     )
 
     return CustomWebviewPlot(fig_type='plotly',
-                             plotdata=fig)
+                             plotdata=fig,
+                             exportdata=exportdata_to_csv(export_data))
 
 # ============= Results table =============
 # parallelization code adapted from refl1d.errors
@@ -371,10 +394,6 @@ def _calc_stats(problem: FitProblem | None, model_index: int, layer_name: str, p
     return iresults
 
 def results_table(layer: MolgroupsLayer, model: Experiment | None = None, problem: FitProblem | None = None, state: MCMCDraw | None = None, n_samples: int = 50, report_delta=False):
-
-    import io
-    import csv
-    from bumps.dream.stats import credible_interval
 
     if state is None:
         return CustomWebviewPlot(fig_type='table',
@@ -456,4 +475,5 @@ def results_table(layer: MolgroupsLayer, model: Experiment | None = None, proble
     print(f'Statistical analysis done after {time.time() - init_time} seconds')
 
     return CustomWebviewPlot(fig_type='table',
-                             plotdata=csv_result)
+                             plotdata=csv_result,
+                             exportdata=csv_result)
