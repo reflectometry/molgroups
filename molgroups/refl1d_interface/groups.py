@@ -233,14 +233,68 @@ class Bilayer(MolgroupsInterface):
 
         # connect reference points
         self.bilayer_center.set_function(self._molgroup.fnGetCenter)
-        self.inner_headgroup_bottom.set_function(functools.partial(lambda blm: blm.z_ihc - 0.5 * blm.l_ihc - blm.av_hg1_l, self._molgroup))
-        self.inner_headgroup_center.set_function(functools.partial(lambda blm: blm.z_ihc - 0.5 * blm.l_ihc - 0.5 * blm.av_hg1_l, self._molgroup))
-        self.inner_hydrophobic_interface.set_function(functools.partial(lambda blm: blm.z_ihc - 0.5 * blm.l_ihc, self._molgroup))
-        self.outer_hydrophobic_interface.set_function(functools.partial(lambda blm: blm.z_ohc + 0.5 * blm.l_ohc, self._molgroup))
-        self.outer_headgroup_center.set_function(functools.partial(lambda blm: blm.z_ohc + 0.5 * blm.l_ohc + 0.5 * blm.av_hg2_l, self._molgroup))
-        self.outer_headgroup_top.set_function(functools.partial(lambda blm: blm.z_ohc + 0.5 * blm.l_ohc + blm.av_hg2_l, self._molgroup))
+        self.inner_headgroup_bottom.set_function(self._inner_headgroup_bottom)
+        self.inner_headgroup_center.set_function(self._inner_headgroup_center)
+        self.inner_hydrophobic_interface.set_function(self._inner_hydrophobic_interface)
+        self.outer_hydrophobic_interface.set_function(self._outer_hydrophobic_interface)
+        self.outer_headgroup_center.set_function(self._outer_headgroup_center)
+        self.outer_headgroup_top.set_function(self._outer_headgroup_top)
 
         super().__post_init__()
+
+    def _inner_headgroup_bottom(self) -> float:
+        """Returns the z position of the bottom of the inner headgroup
+
+        Returns:
+            float: z position of bottom of inner headgroup
+        """
+
+        return self._molgroup.z_ihc - 0.5 * self._molgroup.l_ihc - self._molgroup.av_hg1_l
+
+    def _inner_headgroup_center(self) -> float:
+        """Returns the z position of the center of the inner headgroup
+
+        Returns:
+            float: z position of center of inner headgroup
+        """
+
+        return self._molgroup.z_ihc - 0.5 * self._molgroup.l_ihc - 0.5 * self._molgroup.av_hg1_l
+
+    def _inner_hydrophobic_interface(self) -> float:
+        """Returns the z position of the inner hydrophobic interface
+        
+        Returns:
+
+            float: z position of inner hydrophobic interface
+        """
+        return self._molgroup.z_ihc - 0.5 * self._molgroup.l_ihc
+
+    def _outer_hydrophobic_interface(self) -> float:
+        """Returns the z position of the outer hydrophobic interface
+
+        Returns:
+            float: z position of outer hydrophobic interface
+        """
+
+        return self._molgroup.z_ohc + 0.5 * self._molgroup.l_ohc
+
+    def _outer_headgroup_center(self) -> float:
+        """Returns the z position of the center of the outer headgroup
+
+        Returns:
+            float: z position of center of outer headgroup
+        """
+
+        return self._molgroup.z_ohc + 0.5 * self._molgroup.l_ohc + 0.5 * self._molgroup.av_hg2_l
+
+    def _outer_headgroup_top(self) -> float:
+        """Returns the z position of the top of the outer headgroup
+
+        Returns:
+            float: z position of top of outer headgroup
+        """
+
+        return self._molgroup.z_ohc + 0.5 * self._molgroup.l_ohc + self._molgroup.av_hg2_l
 
     def update(self):
 
