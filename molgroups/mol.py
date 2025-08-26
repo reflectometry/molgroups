@@ -742,18 +742,19 @@ class BLM(CompositenSLDObj):
         self.xray_wavelength = xray_wavelength
 
         # unpack lipids
-        h, nh, m, mm, tm = self._unpack_lipids(inner_lipids, 'headgroup1', 'methylene1', 'methyl1', innerleaflet=True)
+        h, nh, m, mm, lm = self._unpack_lipids(inner_lipids, 'headgroup1', 'methylene1', 'methyl1', innerleaflet=True)
         self.headgroups1 = h
         self.null_hg1 = nh
         self.methylenes1 = m
         self.methyls1 = mm
-        self.inner_lipid_mass = tm
-        h, nh, m, mm, tm = self._unpack_lipids(outer_lipids, 'headgroup2', 'methylene2', 'methyl2', innerleaflet=False)
+        self.inner_lipid_mass = sum(ilm * nf for ilm, nf in zip(lm, self.inner_lipid_nf))
+
+        h, nh, m, mm, lm = self._unpack_lipids(outer_lipids, 'headgroup2', 'methylene2', 'methyl2', innerleaflet=False)
         self.headgroups2 = h
         self.null_hg2 = nh
         self.methylenes2 = m
         self.methyls2 = mm
-        self.outer_lipid_mass = tm
+        self.outer_lipid_mass = sum(ilm * nf for ilm, nf in zip(lm, self.outer_lipid_nf))
 
         self.initial_hg1_lengths = numpy.array([hg1.length for hg1 in self.headgroups1])
         self.defect_hydrocarbon = Box2Err(name='defect_hc')
@@ -949,21 +950,23 @@ class BLM(CompositenSLDObj):
         headgroups = []
         methylenes = []
         methyls = []
-        total_mass = 0.0
+        lipid_masses = []
 
         for i, lipid in enumerate(_lipids):
             hg_name = f"{hgprefix}_{i+1}"
             methylene_name = f"{methyleneprefix}_{i+1}"
             methyl_name = f"{methylprefix}_{i+1}"
 
+            new_lipid_mass = 0.0
+
             if isinstance(lipid.headgroup, cmp.Component):
                 # populates nSL, nSL2, vol, and l
                 hg_obj = ComponentBox(name=hg_name, components=[lipid.headgroup], xray_wavelength=self.xray_wavelength)
-                total_mass += lipid.headgroup.mass
+                new_lipid_mass += lipid.headgroup.mass
             elif isinstance(lipid.headgroup, list):
                 hg_obj = lipid.headgroup[0](name=hg_name, innerleaflet=innerleaflet,
                                             xray_wavelength=self.xray_wavelength, **(lipid.headgroup[1]))
-                total_mass += hg_obj.mass
+                new_lipid_mass += hg_obj.mass
             else:
                 raise TypeError('Lipid.hg must be a Headgroup object or a subclass of CompositenSLDObj')
 
@@ -973,7 +976,7 @@ class BLM(CompositenSLDObj):
             methyl_obj = ComponentBox(name=methyl_name, components=lipid.methyls, xray_wavelength=self.xray_wavelength)
 
             # do not add methyl mass because it is included in lipid tails
-            total_mass += lipid.tails.mass
+            new_lipid_mass += lipid.tails.mass
 
             self.__setattr__(hg_name, hg_obj)
             headgroups.append(self.__getattribute__(hg_name))
@@ -982,10 +985,12 @@ class BLM(CompositenSLDObj):
             self.__setattr__(methyl_name, methyl_obj)
             methyls.append(self.__getattribute__(methyl_name))
 
+            lipid_masses.append(new_lipid_mass)
+
         # find null headgroups to exclude from averaging over headgroup properties
         null_hg = numpy.array([hg.vol <= 0.0 for hg in headgroups], dtype=bool)
 
-        return headgroups, null_hg, methylenes, methyls, total_mass
+        return headgroups, null_hg, methylenes, methyls, lipid_masses
 
     def fnAdjustParameters(self):
         self._adjust_outer_lipids()
