@@ -1422,12 +1422,15 @@ class ssBLM(BLM):
         if cName not in rdict:
             rdict[cName] = {}
 
-        if self.normarea != 0:
-            p1 = self.siox.z + 0.5 * self.siox.length
-            p2 = self.headgroups1[0].z - 0.5 * self.headgroups1[0].length
+        p1 = self.siox.z + 0.5 * self.siox.length
+        p2 = self.headgroups1[0].z - 0.5 * self.headgroups1[0].length
+        if ((self.normarea * (p2 - p1)) != 0):
             rdict[cName]['water in submembrane'] = self.fnGetVolume(p1, p2, recalculate=False)
             rdict[cName]['water in submembrane'] /= (self.normarea * (p2 - p1))
-            rdict[cName]['water in submembrane'] = 1 - rdict[cName]['water in submembrane']
+        else:
+            rdict[cName]['water in submembrane'] = 0.0
+
+        rdict[cName]['water in submembrane'] = 1 - rdict[cName]['water in submembrane']
 
         return rdict
 
