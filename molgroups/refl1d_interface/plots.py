@@ -210,6 +210,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
             group_names[k] += v
 
     statdata: dict[str, list[np.ndarray]] = {lbl: [] for lbl in group_names.keys()}
+    statdata.update({'buffer': []})
     statnormarea = []
     print('Starting CVO uncertainty calculation...')
     init_time = time.time()
@@ -235,6 +236,7 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
             results = executor.map(_worker_eval_plot_point, points)
 
     for (imoldat, normarea) in results:
+        totalarea = 0
         for lbl, item in group_names.items():
             area = 0
             for gp in item:
@@ -243,17 +245,18 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                     newarea = imoldat[gp]['area'] / imoldat[gp]['frac_replacement']
                     area += np.maximum(0, newarea)
             statdata[lbl].append(area / normarea)
+            totalarea += area / normarea
         statnormarea.append(normarea)
+        statdata['buffer'].append(totalarea)
     print(f'CVO uncertainty calculation done after {time.time() - init_time} seconds')
 
     export_data = {'z': zaxis}
 
     for lbl, statlist in statdata.items():
-        color = MOD_COLORS[color_idx % len(MOD_COLORS)]
+        color = MOD_COLORS[color_idx % len(MOD_COLORS)] if lbl != 'buffer' else COLORS[0]
         plotly_color = ','.join(map(str, hex_to_rgb(color)))
         med_area = np.median(statlist, axis=0)
         med_norm_area = np.median(statnormarea)
-        #print(lbl, med_area.shape, zaxis.shape)
         _, q = form_quantiles(statlist, (68,))
         for lo, hi in q:
             uncertainty_traces.append(go.Scatter(x=zaxis,
@@ -266,8 +269,6 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                                     fillcolor=f'rgba({plotly_color},0.3)',
                                     showlegend=False
                                     ))
-            export_data[lbl + ' lower 68p CI'] = lo
-            export_data[lbl + ' upper 68p CI'] = hi
             uncertainty_traces.append(go.Scatter(x=zaxis,
                                     y=hi, # * med_norm_area / normarea,
                                     showlegend=False,
@@ -283,10 +284,19 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
                             name=lbl,
                             legendgroup=lbl,
                             line=dict(color=color)))
-        export_data[lbl] = med_area
+        
+        # write to export data
+        if lbl not in ['buffer']:
+            export_data[lbl] = med_area
+            export_data[lbl + ' lower 68p CI'] = lo
+            export_data[lbl + ' upper 68p CI'] = hi
+            sumarea += med_area * med_norm_area
+        else:
+            export_data[lbl] = 1.0 - med_area
+            export_data[lbl + ' lower 68p CI'] = 1.0 - hi
+            export_data[lbl + ' upper 68p CI'] = 1.0 - lo
 
         color_idx += 1
-        sumarea += med_area * med_norm_area
 
     """
     for lbl, item in group_names.items():
@@ -320,16 +330,16 @@ def cvo_uncertainty_plot(layer: MolgroupsLayer, model: Experiment | None = None,
     plotly_color = ','.join(map(str, hex_to_rgb(color)))
     
     buffer_traces = []
-
+    buffer_med_area = np.median(statdata['buffer'], axis=0)
     buffer_traces.append(go.Scatter(x=zaxis,
-                                y=sumarea / med_norm_area,
+                                y=buffer_med_area,
                                 mode='lines',
                                 name='buffer',
                                 legendgroup='buffer',
+                                showlegend=False,
                                 line=dict(color=color)))
-    export_data['buffer'] = sumarea / med_norm_area
     buffer_traces.append(go.Scatter(x=zaxis,
-                                y=sumarea / med_norm_area,
+                                y=buffer_med_area,
                                 mode='lines',
                                 line=dict(width=0),
                                 fill='tonexty',
