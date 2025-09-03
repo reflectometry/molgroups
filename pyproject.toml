@@ -1,6 +1,6 @@
 [project]
 name = "molgroups"
-version = "0.2.0a1"
+version = "0.2.0a2"
 description = "Molecular Modeling for Scattering Data Analysis"
 authors = [
     { name = "Frank Heinrich", email = "mail@frank-heinrich.net" },
