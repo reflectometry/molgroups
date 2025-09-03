@@ -31,16 +31,16 @@ class MolgroupsExperiment(Experiment):
                  version: str | None = None,
                  auto_tag=False):
         super().__init__(sample, probe, name, roughness_limit, dz, dA, step_interfaces, smoothness, interpolation, constraints, version, auto_tag)
-        self.register_webview_plot(plot_title='Component Volume Occupancy',
+        self.register_webview_plot(plot_title=self.sample.name,
                                    plot_function=functools.partial(cvo_plot, self.sample.molgroups_layer),
                                    change_with='parameter')
-        self.register_webview_plot(plot_title='Component Volume Occupancy Uncertainty',
+        self.register_webview_plot(plot_title=self.sample.name + ' CVO plot',
                                    plot_function=functools.partial(cvo_uncertainty_plot, self.sample.molgroups_layer),
                                    change_with='uncertainty')
-        self.register_webview_plot(plot_title='Statistics table',
+        self.register_webview_plot(plot_title=self.sample.name + ' stats table',
                                    plot_function=functools.partial(results_table, self.sample.molgroups_layer, report_delta=False),
                                    change_with='uncertainty')        
-        self.register_webview_plot(plot_title='Difference statistics table',
+        self.register_webview_plot(plot_title=self.sample.name + ' difference stats table',
                                    plot_function=functools.partial(results_table, self.sample.molgroups_layer, report_delta=True),
                                    change_with='uncertainty')        
 
