@@ -3,7 +3,8 @@ from molgroups.refl1d_interface.experiment import (MolgroupsExperiment,
                                                    make_samples)
 
 from molgroups.refl1d_interface.sas import (SASReflectivityModel,
-                                          SASReflectivityExperiment)
+                                          SASReflectivityExperiment,
+                                          SASReflectivityMolgroupsExperiment)
 
 from molgroups.refl1d_interface.layers import (MolgroupsStack,
                                                MolgroupsLayer)
