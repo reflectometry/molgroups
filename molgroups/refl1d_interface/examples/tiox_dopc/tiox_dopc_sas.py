@@ -2,6 +2,7 @@
 
 import numpy as np
 from refl1d.names import Parameter, SLD, Slab, FitProblem, load4
+from refl1d.probe.resolution import divergence
 from molgroups import components as cmp
 from molgroups.refl1d_interface import (SolidSupportedBilayer,
                                         MolgroupsLayer,
@@ -117,40 +118,22 @@ sample_d2o, sample_h2o = [bilayer(substrate, contrast) for contrast in [d2o, h2o
 step = False
 STEPSIZE=0.5
 
-
-def _angular_resolution(L12: float = 1215.0, S1: float = 25, S2: float = 25) -> np.ndarray:
-    """
-    Calculate FWHM angular resolution (degrees)
-    L12 : float
-        Distance from source to detector in mm
-    S1 : float
-        Source aperture size in mm
-    S2 : float
-        Sample aperture size in mm
-    """
-    import numpy as np
-
-    return np.arctan((S1 + S2 ) / L12) * (180.0 / np.pi)
-
-from refl1d.probe.resolution import dTdL2dQ
-
-def dLexp(L):
-    Lpar = 0.0756
-    A=0.1309
-    K=0.3492
-
-    return Lpar - A * np.exp(-K * L)
-
-dTl = np.ones_like(probe_d2o.Q) * _angular_resolution()
+# calculate full transverse divergence (2 * FWHM) for MAGIK reflectometer
+S1_transverse = 150.0
+S2_transverse = 25.0
+L2 = 330.0
+L1 = 1403.0 + 330.0
+dTl = 2 * np.ones_like(probe_d2o.Q) * divergence(0, (S1_transverse, S2_transverse), (L1, L2))
 
 bilayer_thickness = Parameter(name='SANS bilayer thickness', value=40.0).range(20.0, 80.0)
 bilayer_spacing = Parameter(name='SANS bilayer spacing', value=20.0).range(5.0, 50.0)
+bilayer_sld = Parameter(name='SANS bilayer sld', value=0.4).range(-0.5, 0.5)
 volume_fraction_bilayer = Parameter(name='SANS volume fraction', value=0.00001).range(0.0, 0.0001)
 n_bilayers =  Parameter(name='SANS number of bilayers', value=4).range(1, 20)
 
 sans_parameters = {'scale': 1.0,
                     'background': 0.0,
-                    'sld': 0.4,
+                    'sld': bilayer_sld,
                     'thick_shell': bilayer_thickness,
                     'thick_solvent': bilayer_spacing,
                     'radius': 100.0,
@@ -169,9 +152,6 @@ sasmodel_h = SASReflectivityModel(sas_model_name='multilayer_vesicle',
 
 model_d2o = SASReflectivityMolgroupsExperiment(sas_model=sasmodel_d, sample=sample_d2o, probe=probe_d2o, dz=STEPSIZE, step_interfaces = step)
 model_h2o = SASReflectivityMolgroupsExperiment(sas_model=sasmodel_h, sample=sample_h2o, probe=probe_h2o, dz=STEPSIZE, step_interfaces = step)
-
-#model_d2o = MolgroupsExperiment(sample=sample_d2o, probe=probe_d2o, dz=STEPSIZE, step_interfaces = step)
-#model_h2o = MolgroupsExperiment(sample=sample_h2o, probe=probe_h2o, dz=STEPSIZE, step_interfaces = step)
 
 problem = FitProblem([model_d2o, model_h2o])
 

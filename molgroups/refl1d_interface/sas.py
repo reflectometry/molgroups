@@ -9,7 +9,7 @@ import plotly.graph_objs as go
 from bumps.parameter import Parameter
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from refl1d.experiment import Experiment
-from refl1d.probe.resolution import dTdL2dQ
+from refl1d.probe.resolution import dTdL2dQ, sigma2FWHM
 from refl1d.webview.server.colors import COLORS
 
 from sasmodels.core import load_model
@@ -30,6 +30,9 @@ class SASReflectivityMixin:
     """
     Mixin class that adds SAS capabilities to ANY Refl1D Experiment.
     It overrides reflectivity(), parameters(), and registers the SAS plot.
+
+    Requires a probe object with Q, T, L, dL attributes, due to the 
+    need to calculate resolution.
     """
     
     # Type hinting for the mixin (expects these to exist on the child)
@@ -70,8 +73,10 @@ class SASReflectivityMixin:
         key = ("small_angle_scattering")
         if key not in self._cache:
             data = Data1D(x=self.probe.Q)
-            data.dxl = dTdL2dQ(self.probe.T, self.sas_model.dtheta_l, self.probe.L, self.probe.dL)
-            data.dxw = self.probe.dQ
+            
+            # calculate Q-transformed slit widths. dQ is assumed to be sigma, while dtheta_l is 2 * FWHM
+            data.dxl = dTdL2dQ(np.zeros_like(self.probe.T), self.sas_model.dtheta_l, self.probe.L, self.probe.dL)
+            data.dxw = 2 * sigma2FWHM(self.probe.dQ)
             
             pars = {k: float(p) for k, p in self.sas_model.parameters.items()}
             
