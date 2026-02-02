@@ -68,32 +68,38 @@ class SASReflectivityMixin:
         # Merge parent parameters (Experiment/Molgroups) with SAS parameters
         return super().parameters() | {'sas': self.sas_model.parameters if self.sas_model is not None else {}}
 
+    def _calc_Iq(self, probe, dtheta_l):
+        """ Calculate the small angle scattering I(q) """
+        data = Data1D(x=probe.Q)
+        
+        # calculate Q-transformed slit widths. dQ is assumed to be sigma, while dtheta_l is 2 * FWHM
+        data.dxl = dTdL2dQ(np.zeros_like(probe.T), dtheta_l, probe.L, probe.dL)
+        data.dxw = 2 * sigma2FWHM(probe.dQ)
+        
+        pars = {k: float(p) for k, p in self.sas_model.parameters.items()}
+        
+        # Calculate
+        sasmodel = DirectModel(data=data, model=self._sasmodel)
+        Iq = sasmodel(**pars)
+        return Iq
+
     def sas(self):
         """ Calculate the small angle scattering I(q) """
         key = ("small_angle_scattering")
         if key not in self._cache:
-            data = Data1D(x=self.probe.Q)
-            
-            # calculate Q-transformed slit widths. dQ is assumed to be sigma, while dtheta_l is 2 * FWHM
-            data.dxl = dTdL2dQ(np.zeros_like(self.probe.T), self.sas_model.dtheta_l, self.probe.L, self.probe.dL)
-            data.dxw = 2 * sigma2FWHM(self.probe.dQ)
-            
-            pars = {k: float(p) for k, p in self.sas_model.parameters.items()}
-            
-            # Calculate
-            sasmodel = DirectModel(data=data, model=self._sasmodel)
-            Iq = sasmodel(**pars)
+            probes = [self.probe] if not hasattr(self.probe, 'probes') else self.probe.probes
+            Iq = np.hstack([self._calc_Iq(probe, dtheta_l) for probe, dtheta_l in zip(probes, self.sas_model.dtheta_l)])
             self._cache[key] = Iq
         return self._cache[key]
 
     def reflectivity(self, resolution=True, interpolation=0):
         # 1. Get base reflectivity (Calculated by Experiment or MolgroupsExperiment)
         Q, Rq = super().reflectivity(resolution, interpolation)
-        
-        # 2. Add SAS signal
-        Iq = self.sas() if self.sas_model is not None else 0.0
-        return Q, Rq + Iq
 
+        # 2. Add SAS signal
+        if self.sas_model is not None:
+            Rq += self.sas()
+        return Q, Rq
 
 # --- 2. CONCRETE CLASSES ---
 
