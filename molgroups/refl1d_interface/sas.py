@@ -9,6 +9,7 @@ import plotly.graph_objs as go
 from bumps.parameter import Parameter
 from bumps.webview.server.custom_plot import CustomWebviewPlot
 from refl1d.experiment import Experiment
+from refl1d.probe import ProbeSet
 from refl1d.probe.resolution import dTdL2dQ, sigma2FWHM
 from refl1d.webview.server.colors import COLORS
 
@@ -87,8 +88,20 @@ class SASReflectivityMixin:
         """ Calculate the small angle scattering I(q) """
         key = ("small_angle_scattering")
         if key not in self._cache:
-            probes = [self.probe] if not hasattr(self.probe, 'probes') else self.probe.probes
-            Iq = np.hstack([self._calc_Iq(probe, dtheta_l) for probe, dtheta_l in zip(probes, self.sas_model.dtheta_l)])
+            probes = [self.probe] if not isinstance(self.probe, ProbeSet) else self.probe.probes
+            
+            # Broadcast dtheta_l if it is None or a scalar
+            dtheta_val = self.sas_model.dtheta_l
+            if np.isscalar(dtheta_val) or dtheta_val is None:
+                dtheta_list = [dtheta_val] * len(probes)
+            else:
+                dtheta_list = dtheta_val
+            
+            # Calculate and Stack
+            Iq_parts = [self._calc_Iq(probe, dt) for probe, dt in zip(probes, dtheta_list)]
+            self._cache[key] = np.hstack(Iq_parts)
+
+            Iq = np.hstack([self._calc_Iq(probe, dtheta_l) for probe, dtheta_l in zip(probes, dtheta_list)])
             self._cache[key] = Iq
         return self._cache[key]
 
@@ -98,7 +111,7 @@ class SASReflectivityMixin:
 
         # 2. Add SAS signal
         if self.sas_model is not None:
-            Rq += self.sas()
+            Rq = Rq + self.sas()
         return Q, Rq
 
 # --- 2. CONCRETE CLASSES ---
@@ -140,74 +153,113 @@ def sas_decomposition_plot(model: SASReflectivityExperiment, problem=None) -> Cu
     Webview plot that shows the decomposition of the signal into 
     Reflectivity (Rq) and SAS (Iq) components.
     
-    Args:
-        model: The SASReflectivityExperiment instance (passed by webview)
-        problem: The Bumps FitProblem (passed by webview)
+    Supports both single Probe and ProbeSet.
     """
 
-    # 2. Calculate Components
-    # Total Theory = R(q) + I(q)
-    # We call reflectivity() which returns the sum
-    Q, total_theory = model.reflectivity()
-    
-    # SANS Component = I(q)
-    # We call sas() directly. Handle case where sas_model might be None
-    if model.sas_model is not None:
-        Iq = model.sas()
-    else:
-        Iq = np.zeros_like(Q)
-        
-    # Reflectivity Component = R(q)
-    # Derived by subtraction to ensure consistency
-    Rq = total_theory - Iq
+    # 1. Helpers for Flattening
+    def to_flat(arr):
+        if arr is None: return np.array([])
+        return np.ravel(np.array(arr, dtype=float))
 
-    # 3. Get Data for comparison
-    data_y = model.probe.R
-    data_dy = model.probe.dR
+    # 2. Get Concatenated Theory Components
+    # model.reflectivity() and sas() return 1D arrays matching the full concatenated Q
+    Q_all_raw, total_theory_raw = model.reflectivity()
+    Q_all = to_flat(Q_all_raw)
+    total_theory = to_flat(total_theory_raw)
+    
+    if model.sas_model is not None:
+        Iq_all = to_flat(model.sas())
+    else:
+        Iq_all = np.zeros_like(Q_all)
+        
+    Rq_all = total_theory - Iq_all
+
+    # 3. Identify Probes (Single vs ProbeSet)
+    if hasattr(model.probe, 'probes'):
+        probes = model.probe.probes
+    else:
+        probes = [model.probe]
 
     # 4. Construct Plotly Figure
     fig = go.Figure()
+    
+    # Cursor to track where we are in the concatenated arrays
+    cursor = 0
+    
+    # Loop over probes to slice data and plot traces
+    for i, probe in enumerate(probes):
+        # Determine slice range for this probe
+        n_points = len(probe.Q)
+        start = cursor
+        end = cursor + n_points
+        
+        # Slice the arrays
+        Q = Q_all[start:end]
+        Total = total_theory[start:end]
+        Rq = Rq_all[start:end]
+        Iq = Iq_all[start:end]
+        
+        # Get Data for this probe
+        data_y = to_flat(probe.R)
+        data_dy = to_flat(probe.dR)
+        
+        # Define Color for this Probe (Cycle through COLORS)
+        base_color = COLORS[i % len(COLORS)]
+        
+        # -- Trace: Data --
+        fig.add_trace(go.Scatter(
+            x=Q, y=data_y,
+            error_y=dict(
+                type='data', 
+                array=data_dy, 
+                visible=True,
+                color=base_color,
+                thickness=1
+            ),
+            mode='markers',
+            name=f'Data (Probe {i+1})',
+            marker=dict(
+                color=base_color,
+                symbol='circle',
+                size=6,
+                opacity=0.4
+            ),
+            legendgroup=f'group{i}'
+        ))
 
-    # -- Trace: Data --
-    fig.add_trace(go.Scatter(
-        x=Q, y=data_y,
-        error_y=dict(
-            type='data', 
-            array=data_dy, 
-            visible=True,
-            color='rgba(0, 0, 0, 0.25)'  # <--- Explicit opacity for error bars
-        ),
-        mode='markers',
-        name='Data',
-        marker=dict(
-            color='rgba(0, 0, 0, 0.25)', # <--- Explicit opacity for markers (0.25 = 25% visible)
-            size=6
-        )
-    ))
+        # -- Trace: Total Theory (Solid) --
+        fig.add_trace(go.Scatter(
+            x=Q, y=Total,
+            mode='lines',
+            name=f'Total (Probe {i+1})',
+            line=dict(color=base_color, width=3),
+            legendgroup=f'group{i}'
+        ))
 
-    # -- Trace: Total Theory --
-    fig.add_trace(go.Scatter(
-        x=Q, y=total_theory,
-        mode='lines',
-        name='Total Model (R+I)',
-        line=dict(color=COLORS[0], width=3)
-    ))
+        # -- Trace: Reflectivity (Dash) --
+        # showlegend=True explicitly added
+        fig.add_trace(go.Scatter(
+            x=Q, y=Rq,
+            mode='lines',
+            name=f'Refl (Probe {i+1})',
+            line=dict(color=base_color, width=2, dash='dash'),
+            legendgroup=f'group{i}',
+            showlegend=True 
+        ))
 
-    # -- Trace: Reflectivity Component --
-    fig.add_trace(go.Scatter(
-        x=Q, y=Rq,
-        mode='lines',
-        name='Reflectivity R(q)',
-        line=dict(color=COLORS[1], width=2, dash='dash')
-    ))
+        # -- Trace: SANS (Dot) --
+        # showlegend=True explicitly added
+        fig.add_trace(go.Scatter(
+            x=Q, y=Iq,
+            mode='lines',
+            name=f'SANS (Probe {i+1})',
+            line=dict(color=base_color, width=2, dash='dot'),
+            legendgroup=f'group{i}',
+            showlegend=True 
+        ))
 
-    # -- Trace: SANS Component --
-    fig.add_trace(go.Scatter(
-        x=Q, y=Iq,
-        mode='lines',
-        name='SANS I(q)',
-        line=dict(color=COLORS[2], width=2, dash='dot')
-    ))
+        # Advance cursor
+        cursor += n_points
 
     # 5. Styling
     fig.update_layout(
@@ -216,20 +268,30 @@ def sas_decomposition_plot(model: SASReflectivityExperiment, problem=None) -> Cu
         xaxis_type='linear',
         template='plotly_white',
         yaxis=dict(
-                title='Intensity (R + I)',
-                type='log',
-                exponentformat='power',  # <--- This forces 10^x notation
-                showexponent='all'       # Ensures exponents are shown for all ticks
-            ),
+            title='Intensity (R + I)',
+            type='log',
+            exponentformat='power', 
+            showexponent='all'
+        ),
         legend=dict(x=0.01, y=0.01, xanchor='left', yanchor='bottom', bgcolor='rgba(255,255,255,0.8)')
     )
 
-    # 6. Prepare CSV Export Data
-    # Simple CSV format: Q, Data, Error, Total, Rq, Iq
+    # 6. Prepare CSV Export Data (Concatenated)
     csv_header = "Q,R,dR,Theory,Rq,Iq\n"
     csv_rows = []
-    for i in range(len(Q)):
-        row = f"{float(Q[i]):.6e},{float(data_y[i]):.6e},{float(data_dy[i]):.6e},{float(total_theory[i]):.6e},{float(Rq[i]):.6e},{float(Iq[i]):.6e}"
+    
+    n_pts_total = min(len(Q_all), len(total_theory))
+    
+    # Re-flatten probe data for CSV export
+    if hasattr(model.probe, 'probes'):
+        all_data_y = np.hstack([to_flat(p.R) for p in model.probe.probes])
+        all_data_dy = np.hstack([to_flat(p.dR) for p in model.probe.probes])
+    else:
+        all_data_y = to_flat(model.probe.R)
+        all_data_dy = to_flat(model.probe.dR)
+
+    for i in range(n_pts_total):
+        row = f"{Q_all[i]:.6e},{all_data_y[i]:.6e},{all_data_dy[i]:.6e},{total_theory[i]:.6e},{Rq_all[i]:.6e},{Iq_all[i]:.6e}"
         csv_rows.append(row)
     
     export_data = csv_header + "\n".join(csv_rows)
