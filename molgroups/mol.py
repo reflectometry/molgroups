@@ -2421,7 +2421,7 @@ class DiscreteEuler(nSLDObj):
 
             crit = (zvol > min(z1, z2)) & (zvol < max(z1, z2))
             if numpy.any(crit):
-                volume = numpy.trapz(area[crit], zvol[crit])
+                volume = numpy.trapezoid(area[crit], zvol[crit])
             else:
                 volume = 0.0
 
