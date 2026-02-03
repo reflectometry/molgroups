@@ -1,7 +1,8 @@
 """ Module for interfacing combined reflectivity and small angle scattering models
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+import copy
 
 import numpy as np
 import plotly.graph_objs as go
@@ -19,174 +20,227 @@ from sasmodels.data import Data1D
 
 from .experiment import MolgroupsExperiment
 
-@dataclass
-class SASReflectivityModel:
-    """ Class to hold sasmodels model information
+# --- 1. THE INTERFACE (Base Class) ---
+
+class SASModel:
     """
-    sas_model_name: str | None = None
+    Base class for SAS calculation engines.
+    Subclasses must implement bind() and calculate().
+    """
+    def bind(self, probe):
+        """
+        Associate the model with a Probe (or ProbeSet).
+        Use this to perform expensive setup (like compiling kernels).
+        """
+        raise NotImplementedError("Subclasses must implement bind()")
+
+    def calculate(self):
+        """
+        Return the I(Q) array matching the bound probe.
+        """
+        raise NotImplementedError("Subclasses must implement calculate()")
+    
+    @property
+    def parameters(self):
+        """
+        Return a dictionary of Bumps Parameter objects.
+        """
+        return {}
+
+
+# --- 2. CONCRETE IMPLEMENTATION (Standard Sasmodels) ---
+
+@dataclass
+class StandardSASModel(SASModel):
+    """
+    A SAS model that uses the standard sasmodels library (DirectModel).
+    Manages its own pickling state to handle C-pointers safely.
+    Params should match the parameters expected by the model.
+    """
+    sas_model_name: str
+    params: dict[str, float | Parameter] = field(default_factory=dict)
     dtheta_l: float | None = None
-    parameters: dict[str, float | Parameter] | None = None
+    
+    # Internal state (excluded from __init__)
+    _engines: list[DirectModel] | None = field(default=None, init=False, repr=False)
+    _probe: object = field(default=None, init=False, repr=False)
+
+    def __post_init__(self):
+        # Ensure all inputs in params are converted to Bumps Parameters.
+        # This runs immediately on instantiation, so 'params' always holds objects.
+        for k, v in self.params.items():
+            if not isinstance(v, Parameter):
+                self.params[k] = Parameter.default(v, name=k)
+
+    def bind(self, probe):
+        """
+        Store the probe and initialize the DirectModel engines.
+        """
+        self._probe = probe
+        # Clear existing engines so they are rebuilt for the new probe
+        self._engines = None 
+        # Build immediately for speed
+        self._build_engines()
+
+    def calculate(self):
+        """
+        Lazy-load engines if missing (e.g. after unpickling), then calculate.
+        """
+        if self._engines is None:
+            self._build_engines()
+            
+        # Run calculation across all engines
+        if not self._engines:
+            return np.array([])
+            
+        pars = {k: v.value for k, v in self.params.items()}
+        parts = [model(**pars) for model in self._engines]
+        return np.hstack(parts)
+
+    def _build_engines(self):
+        """
+        The compilation logic. Rebuilds _engines using the bound probe and kernel.
+        """
+        if not self.sas_model_name or self._probe is None:
+            self._engines = []
+            return
+
+        kernel = load_model(self.sas_model_name)
+        
+        # Handle ProbeSet vs Single Probe
+        probes = [self._probe] if not isinstance(self._probe, ProbeSet) else self._probe.probes
+
+        # Handle dtheta_l broadcasting
+        if np.isscalar(self.dtheta_l) or self.dtheta_l is None:
+            dtheta_list = [self.dtheta_l] * len(probes)
+        else:
+            dtheta_list = self.dtheta_l
+        
+        new_engines = []
+        for probe, dt in zip(probes, dtheta_list):
+            data = Data1D(x=probe.Q)
+            # Resolution calculation
+            data.dxl = dTdL2dQ(np.zeros_like(probe.T), dt, probe.L, probe.dL)
+            data.dxw = 2 * sigma2FWHM(probe.dQ) if hasattr(probe, 'dQ') else np.zeros_like(probe.Q)
+            
+            new_engines.append(DirectModel(data=data, model=kernel))
+            
+        self._engines = new_engines
+
+    def __getstate__(self):
+        """
+        Custom pickling: Drop the C-pointer objects (_engines).
+        IMPORTANT: 'params' IS preserved here, allowing Bumps to handle 
+        parameter state persistence during serialization.
+        """
+        state = self.__dict__.copy()
+        state['_engines'] = None 
+        return state
+
+    def __setstate__(self, state):
+        self.__dict__.update(state)
+        # _engines is None; will be rebuilt by calculate()
+
+    @property
+    def parameters(self):
+        return self.params
+
+
+# --- 3. THE MIXIN ---
 
 class SASReflectivityMixin:
     """
     Mixin class that adds SAS capabilities to ANY Refl1D Experiment.
-    It overrides reflectivity(), parameters(), and registers the SAS plot.
-
-    Requires a probe object with Q, T, L, dL attributes, due to the 
-    need to calculate resolution.
+    Delegates calculation to an instance of SASModel.
     """
     
-    # Type hinting for the mixin
-    sas_model: 'SASReflectivityModel'
-    _sasmodels: list[DirectModel]
+    sas_model: SASModel | None
     _cache: dict
     probe: object
     name: str
 
-    def __getstate__(self):
-        """
-        Custom pickling state: Exclude '_sasmodels' because DirectModel objects 
-        contain C-pointers (ctypes) which cannot be pickled.
-        """
-        state = self.__dict__.copy()
-        # Remove the unpickleable list of DirectModels
-        state.pop('_sasmodels', None)
-        return state
-
-    def __setstate__(self, state):
-        """
-        Restore state. '_sasmodels' will be missing and rebuilt lazily in sas().
-        """
-        self.__dict__.update(state)
-
-    def _init_sas(self, sas_model):
-        """ Helper to initialize SAS components. Call this from the child __init__ """
+    def _init_sas(self, sas_model: SASModel | None):
         self.sas_model = sas_model
         
-        # Initialize Parameters
-        if sas_model is not None:
-            for k, p in self.sas_model.parameters.items():
-                if not isinstance(p, Parameter):
-                    self.sas_model.parameters[k] = Parameter.default(p, name=k)
-
-            # Build the engines initially
-            self._build_sas_engines()
+        if self.sas_model is not None:
+            # BINDING: Pass the experiment's probe to the model
+            self.sas_model.bind(self.probe)
         
-        # Register the Decomposition Plot
+        # Register plots
         self.register_webview_plot(
             plot_title='SAS/Refl Decomposition',
             plot_function=sas_decomposition_plot,
             change_with='parameter'
         )
 
-    def _build_sas_engines(self):
-        """
-        Compiles the sasmodels DirectModel objects. 
-        Separated from _init_sas so it can be recalled after pickling.
-        """
-        if self.sas_model is not None and self.sas_model.sas_model_name is not None:
-            kernel = load_model(self.sas_model.sas_model_name)
-            probes = [self.probe] if not isinstance(self.probe, ProbeSet) else self.probe.probes
-
-            # Broadcast dtheta_l if it is None or a scalar
-            dtheta_val = self.sas_model.dtheta_l
-            if np.isscalar(dtheta_val) or dtheta_val is None:
-                dtheta_list = [dtheta_val] * len(probes)
-            else:
-                dtheta_list = dtheta_val
-            
-            # Recreate the list of DirectModels
-            self._sasmodels = [self._setup_model(kernel, probe, dtheta_l) for probe, dtheta_l in zip(probes, dtheta_list)]
-        else:
-            self._sasmodels = []
-
     def parameters(self):
-        # Merge parent parameters with SAS parameters
-        return super().parameters() | {'sas': self.sas_model.parameters if self.sas_model is not None else {}}
-
-    def _setup_model(self, kernel, probe, dtheta_l):
-        """ Set up the probe-specific model for calculation """
-        data = Data1D(x=probe.Q)
-        
-        # calculate Q-transformed slit widths
-        data.dxl = dTdL2dQ(np.zeros_like(probe.T), dtheta_l, probe.L, probe.dL)
-        data.dxw = 2 * sigma2FWHM(probe.dQ)
-
-        return DirectModel(data=data, model=kernel)
+        # Merge experiment params with the model's params
+        base = super().parameters()
+        if self.sas_model:
+            return base | {'sas': self.sas_model.parameters}
+        return base
 
     def sas(self):
         """ Calculate the small angle scattering I(q) """
         key = ("small_angle_scattering")
         if key not in self._cache:
-            # Check if engines exist (they are removed during pickling/copying)
-            if not hasattr(self, '_sasmodels'):
-                self._build_sas_engines()
-
-            if self._sasmodels:
-                pars = {k: float(p) for k, p in self.sas_model.parameters.items()}
-                Iq = np.hstack([sasmodel(**pars) for sasmodel in self._sasmodels])
-            else:
-                # Fallback if no models defined
-                # Determine total length of Q
-                if hasattr(self.probe, 'probes'):
+             if self.sas_model:
+                 self._cache[key] = self.sas_model.calculate()
+             else:
+                 # Fallback for plotting if no model exists
+                 if isinstance(self.probe, ProbeSet):
                      n = sum(len(p.Q) for p in self.probe.probes)
-                else:
+                 else:
                      n = len(self.probe.Q)
-                Iq = np.zeros(n)
-
-            self._cache[key] = Iq
+                 self._cache[key] = np.zeros(n)
+                 
         return self._cache[key]
 
     def reflectivity(self, resolution=True, interpolation=0):
-        # 1. Get base reflectivity (Calculated by Experiment or MolgroupsExperiment)
         Q, Rq = super().reflectivity(resolution, interpolation)
-
-        # 2. Add SAS signal
         if self.sas_model is not None:
+            # Add SAS signal (create new array, do not modify in-place)
             Rq = Rq + self.sas()
         return Q, Rq
 
-# --- 2. CONCRETE CLASSES ---
+
+# --- 4. CONCRETE EXPERIMENT CLASSES ---
 
 @dataclass(init=False)
 class SASReflectivityExperiment(SASReflectivityMixin, Experiment):
     """
     Standard SAS + Reflectivity Experiment.
-    Inherits from Experiment.
     """
-    sas_model: 'SASReflectivityModel' = None
+    sas_model: SASModel | None = None
 
-    def __init__(self, sas_model=None, sample=None, probe=None, name=None, **kwargs):
+    def __init__(self, sas_model: SASModel | None = None, sample=None, probe=None, name=None, **kwargs):
         super().__init__(sample, probe, name, **kwargs)
         self._init_sas(sas_model)
-
 
 @dataclass(init=False)
 class SASReflectivityMolgroupsExperiment(SASReflectivityMixin, MolgroupsExperiment):
     """
     Molgroups-Enabled SAS + Reflectivity Experiment.
-    Inherits from MolgroupsExperiment.
     """
-    sas_model: 'SASReflectivityModel' = None
+    sas_model: SASModel | None = None
 
-    def __init__(self, sas_model=None, sample=None, probe=None, name=None, **kwargs):
+    def __init__(self, sas_model: SASModel | None = None, sample=None, probe=None, name=None, **kwargs):
         super().__init__(sample, probe, name, **kwargs)
         self._init_sas(sas_model)
-    
+
+
+# --- 5. PLOTTING FUNCTION ---
+
 def sas_decomposition_plot(model: SASReflectivityExperiment, problem=None) -> CustomWebviewPlot:
     """
     Webview plot that shows the decomposition of the signal into 
     Reflectivity (Rq) and SAS (Iq) components.
-    
-    Supports both single Probe and ProbeSet.
     """
 
-    # 1. Helpers for Flattening
     def to_flat(arr):
         if arr is None: return np.array([])
         return np.ravel(np.array(arr, dtype=float))
 
-    # 2. Get Concatenated Theory Components
     Q_all_raw, total_theory_raw = model.reflectivity()
     Q_all = to_flat(Q_all_raw)
     total_theory = to_flat(total_theory_raw)
@@ -195,93 +249,41 @@ def sas_decomposition_plot(model: SASReflectivityExperiment, problem=None) -> Cu
         Iq_all = to_flat(model.sas())
     else:
         Iq_all = np.zeros_like(Q_all)
-        
     Rq_all = total_theory - Iq_all
 
-    # 3. Identify Probes (Single vs ProbeSet)
-    if hasattr(model.probe, 'probes'):
+    if isinstance(model.probe, ProbeSet):
         probes = model.probe.probes
     else:
         probes = [model.probe]
 
-    # 4. Construct Plotly Figure
     fig = go.Figure()
-    
     cursor = 0
-    
     for i, probe in enumerate(probes):
-        # Determine slice range
         n_points = len(probe.Q)
         start = cursor
         end = cursor + n_points
-        
-        # Slice arrays
         Q = Q_all[start:end]
         Total = total_theory[start:end]
         Rq = Rq_all[start:end]
         Iq = Iq_all[start:end]
         
-        # Get Data
         data_y = to_flat(probe.R)
         data_dy = to_flat(probe.dR)
-        
         base_color = COLORS[i % len(COLORS)]
         
-        # Trace: Data
-        fig.add_trace(go.Scatter(
-            x=Q, y=data_y,
-            error_y=dict(type='data', array=data_dy, visible=True, color=base_color, thickness=1),
-            mode='markers',
-            name=f'Data (Probe {i+1})',
-            marker=dict(color=base_color, symbol='circle', size=6, opacity=0.4),
-            legendgroup=f'group{i}'
-        ))
-
-        # Trace: Total Theory
-        fig.add_trace(go.Scatter(
-            x=Q, y=Total,
-            mode='lines',
-            name=f'Total (Probe {i+1})',
-            line=dict(color=base_color, width=3),
-            legendgroup=f'group{i}'
-        ))
-
-        # Trace: Reflectivity
-        fig.add_trace(go.Scatter(
-            x=Q, y=Rq,
-            mode='lines',
-            name=f'Refl (Probe {i+1})',
-            line=dict(color=base_color, width=2, dash='dash'),
-            legendgroup=f'group{i}',
-            showlegend=True 
-        ))
-
-        # Trace: SANS
-        fig.add_trace(go.Scatter(
-            x=Q, y=Iq,
-            mode='lines',
-            name=f'SANS (Probe {i+1})',
-            line=dict(color=base_color, width=2, dash='dot'),
-            legendgroup=f'group{i}',
-            showlegend=True 
-        ))
-
+        fig.add_trace(go.Scatter(x=Q, y=data_y, error_y=dict(type='data', array=data_dy, visible=True, color=base_color, thickness=1),
+            mode='markers', name=f'Data (Probe {i+1})', marker=dict(color=base_color, symbol='circle', size=6, opacity=0.4), legendgroup=f'group{i}'))
+        fig.add_trace(go.Scatter(x=Q, y=Total, mode='lines', name=f'Total (Probe {i+1})', line=dict(color=base_color, width=3), legendgroup=f'group{i}'))
+        fig.add_trace(go.Scatter(x=Q, y=Rq, mode='lines', name=f'Refl (Probe {i+1})', line=dict(color=base_color, width=2, dash='dash'), legendgroup=f'group{i}', showlegend=True))
+        fig.add_trace(go.Scatter(x=Q, y=Iq, mode='lines', name=f'SANS (Probe {i+1})', line=dict(color=base_color, width=2, dash='dot'), legendgroup=f'group{i}', showlegend=True))
         cursor += n_points
 
-    # 5. Styling
-    fig.update_layout(
-        title=f'Signal Decomposition: {model.name}',
-        xaxis_title='Q (Å⁻¹)',
-        xaxis_type='linear',
-        template='plotly_white',
+    fig.update_layout(title=f'Signal Decomposition: {model.name}', xaxis_title='Q (Å⁻¹)', xaxis_type='linear', template='plotly_white',
         yaxis=dict(title='Intensity (R + I)', type='log', exponentformat='power', showexponent='all'),
-        legend=dict(x=0.01, y=0.01, xanchor='left', yanchor='bottom', bgcolor='rgba(255,255,255,0.8)')
-    )
+        legend=dict(x=0.01, y=0.01, xanchor='left', yanchor='bottom', bgcolor='rgba(255,255,255,0.8)'))
 
-    # 6. Prepare CSV Export Data
     csv_header = "Q,R,dR,Theory,Rq,Iq\n"
     csv_rows = []
-    
     n_pts_total = min(len(Q_all), len(total_theory))
     
     if hasattr(model.probe, 'probes'):
@@ -295,6 +297,4 @@ def sas_decomposition_plot(model: SASReflectivityExperiment, problem=None) -> Cu
         row = f"{Q_all[i]:.6e},{all_data_y[i]:.6e},{all_data_dy[i]:.6e},{total_theory[i]:.6e},{Rq_all[i]:.6e},{Iq_all[i]:.6e}"
         csv_rows.append(row)
     
-    export_data = csv_header + "\n".join(csv_rows)
-
-    return CustomWebviewPlot(fig_type='plotly', plotdata=fig, exportdata=export_data)
+    return CustomWebviewPlot(fig_type='plotly', plotdata=fig, exportdata=csv_header + "\n".join(csv_rows))

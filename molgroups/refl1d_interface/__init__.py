@@ -2,7 +2,7 @@ from molgroups.refl1d_interface.experiment import (MolgroupsExperiment,
                                                    MolgroupsMixedExperiment,
                                                    make_samples)
 
-from molgroups.refl1d_interface.sas import (SASReflectivityModel,
+from molgroups.refl1d_interface.sas import (StandardSASModel,
                                           SASReflectivityExperiment,
                                           SASReflectivityMolgroupsExperiment)
 
