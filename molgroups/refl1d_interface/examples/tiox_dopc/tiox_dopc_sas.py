@@ -9,7 +9,7 @@ from molgroups.refl1d_interface import (SolidSupportedBilayer,
                                         MolgroupsStack,
                                         MolgroupsExperiment)
 
-from molgroups.refl1d_interface import SASReflectivityMolgroupsExperiment, SASReflectivityModel
+from molgroups.refl1d_interface import SASReflectivityMolgroupsExperiment, StandardSASModel
 
 ## === Probes/data files ===
 probe_d2o = load4('ch061_d2o_ph7.refl', back_reflectivity=True, name='D2O')
@@ -141,13 +141,13 @@ sans_parameters = {'scale': 1.0,
                     'n_shells': n_bilayers * 2 - 1
                     }
 
-sasmodel_d = SASReflectivityModel(sas_model_name='multilayer_vesicle',
+sasmodel_d = StandardSASModel(sas_model_name='multilayer_vesicle',
                                 dtheta_l=dTl,
-                                parameters=sans_parameters | {'sld_solvent': d2o.rho})
+                                params=sans_parameters | {'sld_solvent': d2o.rho})
 
-sasmodel_h = SASReflectivityModel(sas_model_name='multilayer_vesicle',
+sasmodel_h = StandardSASModel(sas_model_name='multilayer_vesicle',
                                 dtheta_l=dTl,
-                                parameters=sans_parameters | {'sld_solvent': h2o.rho})
+                                params=sans_parameters | {'sld_solvent': h2o.rho})
 
 
 model_d2o = SASReflectivityMolgroupsExperiment(sas_model=sasmodel_d, sample=sample_d2o, probe=probe_d2o, dz=STEPSIZE, step_interfaces = step)

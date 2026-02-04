@@ -210,7 +210,7 @@ class StandardSASModel(SASModel):
         plots: PlotDict = {'parameter': [], 'uncertainty': []}
         
         # Register profile plot only if supported by the kernel
-        if self._engines and hasattr(self._engines[0], 'profile'):
+        if self._engines and self._engines[0].model.info.profile is not None:
              plots['parameter'].append(('SANS Profile', sans_profile_plot))
              
         return plots
@@ -364,8 +364,8 @@ class MolgroupsSphereSASModel(SASModel):
         # Initialize kernel with safe limit (10) to check for 'profile' capability
         if self._engines is None and self._probe is not None:
              self._ensure_kernel(10)
-             
-        if self._engines and hasattr(self._engines[0], 'profile'):
+        
+        if self._engines and self._engines[0].model.info.profile is not None:
             # Insert at the beginning of the parameter list
             plots['parameter'].insert(0, ('SANS Radial Profile', sans_profile_plot))
 
