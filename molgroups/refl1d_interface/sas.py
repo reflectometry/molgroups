@@ -277,6 +277,7 @@ class MolgroupsSphereSASModel(SASModel):
         r_core (Parameter): Radius of the inner core.
         scale (Parameter): Overall intensity scaling factor.
         background (Parameter): Background intensity.
+        dtheta_l (float or list, optional): Angular divergence for resolution smearing.
     """
     molgroups_layer: MolgroupsLayer
     dz: float = 5.0
@@ -285,6 +286,7 @@ class MolgroupsSphereSASModel(SASModel):
     r_core: Union[Parameter, float] = 0.0
     scale: Union[Parameter, float] = 1.0
     background: Union[Parameter, float] = 0.0
+    dtheta_l: Optional[Union[float, List[float]]] = None
 
     # Fixed configuration
     sas_model_name: str = 'core_multi_shell'
@@ -429,7 +431,12 @@ class MolgroupsSphereSASModel(SASModel):
         if self._probe is None: return
         
         probes = [self._probe] if not isinstance(self._probe, ProbeSet) else self._probe.probes
-        dtheta_list = [0.0] * len(probes)
+        
+        # Handle angular divergence (dtheta) logic
+        if np.isscalar(self.dtheta_l) or self.dtheta_l is None:
+            dtheta_list = [self.dtheta_l] * len(probes)
+        else:
+            dtheta_list = self.dtheta_l # type: ignore
 
         new_engines = []
         for probe, dt in zip(probes, dtheta_list):
