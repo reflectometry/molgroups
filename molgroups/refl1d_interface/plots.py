@@ -167,14 +167,8 @@ def _calc_profile(problem: FitProblem | None, model_index: int, layer_name: str,
     model: Experiment = list(problem.models)[model_index]
     model.update()
     model.nllf()
-    if hasattr(model, 'parts'):
-        for p in model.parts:
-            if hasattr(p.sample, 'molgroups_layer'):
-                if p.sample.molgroups_layer.name == layer_name:
-                    layer = p.sample.molgroups_layer
-                    break
-    else:
-        layer = model.sample.molgroups_layer
+    layer: MolgroupsLayer = model._molgroups_layers[layer_name]
+    
     imoldat = {}
     for group in [layer.base_group] + layer.add_groups + layer.overlay_groups:
         for k, v in group._group_names.items():

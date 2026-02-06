@@ -31,6 +31,10 @@ class MolgroupsExperiment(Experiment):
                  version: str | None = None,
                  auto_tag=False):
         super().__init__(sample, probe, name, roughness_limit, dz, dA, step_interfaces, smoothness, interpolation, constraints, version, auto_tag)
+
+        # store molgroups layer
+        self._molgroups_layers = {self.sample.molgroups_layer.name: self.sample.molgroups_layer}
+
         self.register_webview_plot(plot_title=self.sample.name,
                                    plot_function=functools.partial(cvo_plot, self.sample.molgroups_layer),
                                    change_with='parameter')
@@ -56,11 +60,15 @@ class MolgroupsMixedExperiment(MixedExperiment):
                  interpolation=0,
                  **kw):
         super().__init__(samples, ratio, probe, name, coherent, interpolation, **kw)
+
+        self._molgroups_layers = {}
         for i, (p, s) in enumerate(zip(self.parts, self.samples)):
             
             # if MolgroupsStack samples, use MolgroupsExperiments
             if isinstance(s, MolgroupsStack):
                 p = MolgroupsExperiment(s, probe, name=s.name, **kw)
+                self.parts[i] = p
+                self._molgroups_layers.update(p._molgroups_layers)
 
             # experiment inherits registered webview plots
             for key, item in p._webview_plots.items():

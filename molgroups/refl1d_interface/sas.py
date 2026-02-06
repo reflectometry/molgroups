@@ -356,10 +356,10 @@ class MolgroupsSphereSASModel(SASModel):
         """ Return dictionary of categorized plots """
         plots: PlotDict = {
             'parameter': [
-                ('SANS Layer Profile', functools.partial(cvo_plot, self.molgroups_layer))
+                (f'{self.molgroups_layer.name}', functools.partial(cvo_plot, self.molgroups_layer))
             ],
             'uncertainty': [
-                ('SANS Layer CVO', functools.partial(cvo_uncertainty_plot, self.molgroups_layer))
+                (f'{self.molgroups_layer.name} CVO plot', functools.partial(cvo_uncertainty_plot, self.molgroups_layer))
             ]
         }
         
@@ -634,6 +634,9 @@ class SASReflectivityMolgroupsExperiment(SASReflectivityMixin, MolgroupsExperime
     def __init__(self, sas_model: Optional[SASModel] = None, sample: Any = None, probe: Any = None, name: Optional[str] = None, **kwargs: Any) -> None:
         super().__init__(sample, probe, name, **kwargs)
         self._init_sas(sas_model)
+
+        if isinstance(self.sas_model, MolgroupsSphereSASModel):
+            self._molgroups_layers.update({self.sas_model.molgroups_layer.name: self.sas_model.molgroups_layer})
 
 
 # --- 6. PLOTTING FUNCTIONS ---
