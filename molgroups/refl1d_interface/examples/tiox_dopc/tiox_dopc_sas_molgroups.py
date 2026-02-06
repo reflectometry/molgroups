@@ -153,8 +153,8 @@ L2 = 330.0
 L1 = 1403.0 + 330.0
 dTl = 2 * np.ones_like(probe_d2o.Q) * divergence(0, (S1_transverse, S2_transverse), (L1, L2))
 
-sansmodel_d = MolgroupsSphereSASModel(sans_bilayer(d2o), r_core=100.0, scale=scale_sans, dz=SANS_STEPSIZE)
-sansmodel_h = MolgroupsSphereSASModel(sans_bilayer(h2o), r_core=100.0, scale=scale_sans, dz=SANS_STEPSIZE)
+sansmodel_d = MolgroupsSphereSASModel(sans_bilayer(d2o), r_core=100.0, scale=scale_sans, dz=SANS_STEPSIZE, dtheta_l=dTl, geometry_exponent=0)
+sansmodel_h = MolgroupsSphereSASModel(sans_bilayer(h2o), r_core=100.0, scale=scale_sans, dz=SANS_STEPSIZE, dtheta_l=dTl, geometry_exponent=0)
 
 model_d2o = SASReflectivityMolgroupsExperiment(sas_model=sansmodel_d, sample=sample_d2o, probe=probe_d2o, dz=STEPSIZE, step_interfaces = step)
 model_h2o = SASReflectivityMolgroupsExperiment(sas_model=sansmodel_h, sample=sample_h2o, probe=probe_h2o, dz=STEPSIZE, step_interfaces = step)
