@@ -2,23 +2,28 @@
 Module for interfacing combined reflectivity and small angle scattering (SAS) models.
 
 This module provides the architecture for simultaneous fitting of Reflectivity and SANS data
-within the Refl1D framework. It defines a base `SASModel` class and concrete implementations
-for standard sasmodels usage (`StandardSASModel`) and complex molecular layers (`MolgroupsSphereSASModel`).
+within the Refl1D framework, as well as standalone SANS fitting using Bumps.
+
+It defines a base `SASModel` class and concrete implementations for standard sasmodels usage 
+(`StandardSASModel`) and complex molecular layers (`MolgroupsSphereSASModel`).
 
 Key Classes:
-    - SASModel: Abstract base class defining the interface for SAS engines.
+    - SASModel: Abstract base class defining the interface for SAS engines. Expects standard 
+      sasmodels Data1D objects.
     - StandardSASModel: Wrapper for standard sasmodels library models (e.g., cylinder, sphere).
-    - MolgroupsSphereSASModel: specialized model mapping a MolgroupsLayer profile to a
+    - MolgroupsSphereSASModel: Specialized model mapping a MolgroupsLayer profile to a
       'core_multi_shell' sasmodel, handling dynamic shell count and parameter mapping.
-    - SASReflectivityMixin: Mixin for Experiment classes to add SAS calculation capabilities.
+    - MolgroupsSASExperiment: Bumps Experiment for standalone SANS fitting.
+    - SASReflectivityMixin: Mixin for Refl1D Experiment classes. It handles the conversion 
+      of Refl1D Probes to SAS Data1D objects (including resolution smearing) and binds them 
+      to the SASModel.
 
 Dependencies:
     - sasmodels: Used for the underlying scattering kernel calculations.
-    - refl1d: Provides the experiment and probe framework.
+    - refl1d: Provides the experiment and probe framework (required only for Refl1D experiments).
     - bumps: Handles parameter management.
 """
 
-from __future__ import annotations
 from dataclasses import dataclass, field
 import copy
 import functools
@@ -27,18 +32,23 @@ from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 import numpy as np
 import plotly.graph_objs as go
 
+# Bumps
 from bumps.parameter import Parameter
 from bumps.webview.server.custom_plot import CustomWebviewPlot
-from refl1d.experiment import Experiment
-from refl1d.probe import ProbeSet
-from refl1d.probe.resolution import dTdL2dQ, sigma2FWHM
-from refl1d.webview.server.colors import COLORS
 
+# Sasmodels
 from sasmodels.core import load_model, load_model_info, build_model
 from sasmodels.direct_model import DirectModel
 from sasmodels.data import Data1D
 from sasmodels.modelinfo import parse_parameter, ParameterTable
 
+# Refl1D
+from refl1d.experiment import Experiment as Refl1DExperiment
+from refl1d.probe import Probe, ProbeSet
+from refl1d.probe.resolution import dTdL2dQ, sigma2FWHM
+from refl1d.webview.server.colors import COLORS
+
+# Molgroups
 from .experiment import MolgroupsExperiment
 from .layers import MolgroupsLayer
 from .plots import cvo_plot, cvo_uncertainty_plot
@@ -49,36 +59,64 @@ ProfileType = Tuple[Optional[np.ndarray], Optional[np.ndarray], Optional[Tuple[s
 PlotList = List[Tuple[str, Callable[..., CustomWebviewPlot]]]
 PlotDict = Dict[str, PlotList]
 
-# --- 1. THE INTERFACE (Base Class) ---
+
+# =============================================================================
+# 1. PURE SAS MODELS
+# =============================================================================
 
 class SASModel:
     """
     Base class for SAS calculation engines.
     
-    Subclasses must implement `bind()` to link to an experiment probe and `calculate()`
+    This class is responsible for the physics of the scattering calculation.
+    It accepts a list of `sasmodels.data.Data1D` objects, which must already
+    contain the Q values and resolution information (dx or dxl).
+    
+    Subclasses must implement `_build_engines()` to compile the kernel and `calculate()`
     to return the theoretical intensity I(Q).
     """
-    def bind(self, probe: Any) -> None:
-        """
-        Associate the model with a Probe (or ProbeSet).
+    _data_list: List[Data1D] = []
+    _engines: Optional[List[DirectModel]] = None
 
-        This method is used to perform expensive setup steps, such as compiling
-        SAS kernels or initializing data structures that depend on the Q-vector.
+    def bind(self, data: Union[None, Data1D, List[Data1D]]) -> None:
+        """
+        Associate the model with data.
 
         Args:
-            probe (Any): The experimental probe containing Q values (typically Probe or ProbeSet).
+            data: A single `sasmodels.data.Data1D` object or a list of them.
+                  The data objects must contain Q, I, dI, and resolution (dx or dxl).
+        
+        Raises:
+            TypeError: If the input data is not of type Data1D.
         """
-        raise NotImplementedError("Subclasses must implement bind()")
+        if isinstance(data, (list, tuple)):
+            self._data_list = data
+        else:
+            self._data_list = [data]
+        
+        # Strict validation: The model only understands Data1D
+        if not all(isinstance(d, Data1D) for d in self._data_list):
+            raise TypeError("SASModel.bind strictly expects sasmodels.data.Data1D objects. "
+                            "Refl1D Probes must be processed by the Experiment/Mixin first.")
+
+        self._build_engines()
+
+    def _build_engines(self) -> None:
+        """
+        Construct the sasmodels DirectModel engines based on the bound data.
+        Must be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement _build_engines")
 
     def calculate(self) -> np.ndarray:
         """
         Calculate the scattering intensity I(Q).
 
         Returns:
-            np.ndarray: The calculated I(Q) matching the Q-points of the bound probe.
-                        If multiple probes are bound, the arrays should be concatenated.
+            np.ndarray: The calculated I(Q) matching the Q-points of the bound data.
+                        If multiple data objects are bound, the arrays are concatenated.
         """
-        raise NotImplementedError("Subclasses must implement calculate()")
+        raise NotImplementedError("Subclasses must implement calculate")
     
     def get_profile(self) -> ProfileType:
         """
@@ -116,8 +154,6 @@ class SASModel:
         return {}
 
 
-# --- 2. CONCRETE IMPLEMENTATION (Standard Sasmodels) ---
-
 @dataclass
 class StandardSASModel(SASModel):
     """
@@ -125,31 +161,19 @@ class StandardSASModel(SASModel):
 
     This class wraps a standard sasmodels kernel (e.g., 'cylinder', 'sphere')
     and manages the mapping of Bumps parameters to the kernel inputs.
+    The resolution smearing logic is handled automatically by the DirectModel
+    based on the attributes (`dx` or `dxl`) of the bound Data1D objects.
     """
     sas_model_name: str
     params: Dict[str, Union[float, Parameter]] = field(default_factory=dict)
-    dtheta_l: Optional[Union[float, List[float]]] = None
     
-    # Internal state (excluded from __init__)
     _engines: Optional[List[DirectModel]] = field(default=None, init=False, repr=False)
-    _probe: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
         # Ensure all inputs in params are converted to Bumps Parameters.
         for k, v in self.params.items():
             if not isinstance(v, Parameter):
                 self.params[k] = Parameter.default(v, name=k)
-
-    def bind(self, probe: Any) -> None:
-        """
-        Bind the model to a probe and build the calculation engines.
-
-        Args:
-            probe (Any): The experimental data probe.
-        """
-        self._probe = probe
-        self._engines = None 
-        self._build_engines()
 
     def _generate_params(self) -> Dict[str, float]:
         """
@@ -158,7 +182,19 @@ class StandardSASModel(SASModel):
         Returns:
             dict: Dictionary of parameter values (floats) expected by sasmodels.
         """
-        return {k: v.value for k, v in self.params.items()}  # type: ignore
+        return {k: v.value for k, v in self.params.items()} # type: ignore
+
+    def _build_engines(self) -> None:
+        """
+        Compile the sasmodels kernel and create DirectModel instances for each data object.
+        """
+        if not self.sas_model_name or not self._data_list:
+            self._engines = []
+            return
+
+        kernel = load_model(self.sas_model_name)
+        # DirectModel uses data.dx (pinhole) or data.dxl (slit) automatically from the Data1D object
+        self._engines = [DirectModel(data=d, model=kernel) for d in self._data_list]
 
     def calculate(self) -> np.ndarray:
         """
@@ -169,12 +205,10 @@ class StandardSASModel(SASModel):
         """
         if self._engines is None:
             self._build_engines()
-            
         if not self._engines:
             return np.array([])
             
         pars = self._generate_params()
-        # Calculate for each probe/engine and concatenate results
         parts = [model(**pars) for model in self._engines]
         return np.hstack(parts)
 
@@ -185,69 +219,33 @@ class StandardSASModel(SASModel):
         Returns:
             tuple: (r, sld, (xlabel, ylabel)) or (None, None, None).
         """
-        if self._engines is None:
-            self._build_engines()
-        
-        # Guard against empty engine list or missing profile method on the kernel
+        if self._engines is None: self._build_engines()
         if not self._engines or not hasattr(self._engines[0], 'profile'):
             return None, None, None
-
-        pars = self._generate_params()
+        
         try:
-            # sasmodels profile returns x, y, (xlabel, ylabel)
-            return self._engines[0].profile(**pars)  # type: ignore
+            return self._engines[0].profile(**self._generate_params()) # type: ignore
         except (AttributeError, TypeError, NotImplementedError):
             return None, None, None
-
+    
     def get_plots(self) -> PlotDict:
         """ 
         Return list of Standard SAS plots categorized by update trigger.
         Checks existence of profile method WITHOUT performing a calculation.
         """
-        if self._engines is None:
-            self._build_engines()
-            
+        if self._engines is None: self._build_engines()
         plots: PlotDict = {'parameter': [], 'uncertainty': []}
         
-        # Register profile plot only if supported by the kernel
         if self._engines and self._engines[0].model.info.profile is not None:
              plots['parameter'].append(('SANS Profile', sans_profile_plot))
-             
         return plots
 
-    def _build_engines(self) -> None:
-        """
-        Compile the sasmodels kernel and create DirectModel instances for each probe.
-        """
-        if not self.sas_model_name or self._probe is None:
-            self._engines = []
-            return
-
-        kernel = load_model(self.sas_model_name)
-        
-        probes = [self._probe] if not isinstance(self._probe, ProbeSet) else self._probe.probes
-
-        # Handle angular divergence (dtheta) logic
-        if np.isscalar(self.dtheta_l) or self.dtheta_l is None:
-            dtheta_list = [self.dtheta_l] * len(probes)
-        else:
-            dtheta_list = self.dtheta_l  # type: ignore
-        
-        new_engines = []
-        for probe, dt in zip(probes, dtheta_list):
-            # Create Data1D objects required by sasmodels
-            data = Data1D(x=probe.Q)
-            
-            # Map resolution parameters
-            data.dxl = dTdL2dQ(np.zeros_like(probe.T), dt, probe.L, probe.dL)
-            data.dxw = 2 * sigma2FWHM(probe.dQ) if hasattr(probe, 'dQ') else np.zeros_like(probe.Q)
-            
-            new_engines.append(DirectModel(data=data, model=kernel))
-            
-        self._engines = new_engines
+    @property
+    def parameters(self) -> Dict[str, Parameter]:
+        return self.params # type: ignore
 
     def __getstate__(self) -> Dict[str, Any]:
-        # Exclude unpickleable C-objects
+        """Custom pickling: Drop the C-pointer objects (_engines)."""
         state = self.__dict__.copy()
         state['_engines'] = None 
         return state
@@ -255,12 +253,6 @@ class StandardSASModel(SASModel):
     def __setstate__(self, state: Dict[str, Any]) -> None:
         self.__dict__.update(state)
 
-    @property
-    def parameters(self) -> Dict[str, Parameter]:
-        return self.params  # type: ignore
-
-
-# --- 3. MOLGROUPS IMPLEMENTATION ---
 
 @dataclass
 class MolgroupsSphereSASModel(SASModel):
@@ -277,24 +269,19 @@ class MolgroupsSphereSASModel(SASModel):
         r_core (Parameter): Radius of the inner core.
         scale (Parameter): Overall intensity scaling factor.
         background (Parameter): Background intensity.
-        dtheta_l (float or list, optional): Angular divergence for resolution smearing.
     """
     molgroups_layer: MolgroupsLayer
     dz: float = 5.0
-    
-    # Common parameters
     r_core: Union[Parameter, float] = 0.0
     scale: Union[Parameter, float] = 1.0
     background: Union[Parameter, float] = 0.0
-    dtheta_l: Optional[Union[float, List[float]]] = None
-
+    
     # Fixed configuration
     sas_model_name: str = 'core_multi_shell'
-    geometry_exponent: int = 2 # Sphere (p=2)
+    geometry_exponent: int = 0 # do not scale layer thicknesses by radius
 
     # Internal state
     _engines: Optional[List[DirectModel]] = field(default=None, init=False, repr=False)
-    _probe: Any = field(default=None, init=False, repr=False)
     _last_n_shells: int = field(default=0, init=False, repr=False)
     _kernel: Any = field(default=None, init=False, repr=False)
     
@@ -306,14 +293,14 @@ class MolgroupsSphereSASModel(SASModel):
 
     @property
     def parameters(self) -> Dict[str, Parameter]:
-        """ Merge molgroups parameters with specific SAS parameters. """
+        """Merge molgroups parameters with specific SAS parameters."""
         mg_params = self.molgroups_layer.parameters()
         own_params = {
             'r_core': self.r_core,
             'scale': self.scale, 
             'background': self.background
         }
-        return mg_params | own_params  # type: ignore
+        return mg_params | own_params # type: ignore
 
     def bind(self, probe: Any) -> None:
         self._probe = probe
@@ -467,7 +454,10 @@ class MolgroupsSphereSASModel(SASModel):
         
         pars = self._generate_params(z, sld, n_shells)
         
-        if not self._engines: return np.array([])
+        # Build engines if missing or if the kernel object changed (e.g. N resize)
+        if not self._engines or (self._engines and self._engines[0].model != self._kernel):
+             self._engines = [DirectModel(data=d, model=self._kernel) for d in self._data_list]
+
         parts = [model(**pars) for model in self._engines]
         return np.hstack(parts)
 
@@ -479,16 +469,16 @@ class MolgroupsSphereSASModel(SASModel):
         expected by the dynamically built kernel.
         """
         pars = {
-            'scale': self.scale.value,  # type: ignore
-            'background': self.background.value,  # type: ignore
+            'scale': self.scale.value, # type: ignore
+            'background': self.background.value, # type: ignore
             'n': float(n_shells),
         }
         
-        # Determine effective core radius (handling overlap)
-        r_core_val = self.r_core.value  # type: ignore
+        r_core_val = self.r_core.value # type: ignore
         overlap_obj = self.molgroups_layer.base_group.overlap
         overlap_val = overlap_obj.value if isinstance(overlap_obj, Parameter) else float(overlap_obj)
 
+        # Handle core radius vs overlap
         if r_core_val > overlap_val:
             pars['radius'] = r_core_val - overlap_val
         else:
@@ -501,22 +491,111 @@ class MolgroupsSphereSASModel(SASModel):
         r_start = pars['radius']
         effective_r_core = max(r_start, overlap_val)
         
-        # Iterate to generate SCALAR parameters (thickness{i}, sld{i})
         for i in range(n_shells):
             r_current = r_start + z[i]
-            
-            # Map linear step to spherical thickness
             if effective_r_core > 1e-9 and r_current > 1e-9:
                 thick_i = self.dz * (effective_r_core / r_current)**p
             else:
                 thick_i = self.dz
-            
             pars[f'thickness{i+1}'] = thick_i
             pars[f'sld{i+1}'] = sld[i]
 
         return pars
 
+    def _ensure_kernel(self, n_shells: int) -> None:
+        """
+        Dynamically patches the core_multi_shell definition to allow 'n' 
+        to reach the current shell count.
+
+        This uses 'parse_parameter' to reconstruct the parameter table with 
+        a new limit for 'n' and expanded vector definitions.
+        
+        Args:
+            n_shells (int): The required number of shells.
+        """
+        if self._kernel is not None and self._last_n_shells >= n_shells:
+            return
+
+        base_info = load_model_info(self.sas_model_name)
+        my_info = copy.deepcopy(base_info)
+        
+        # Explicitly define vector parameters for the core_multi_shell model
+        raw_params = [
+            ["sld_core", "1e-6/Ang^2", 1.0, [-np.inf, np.inf], "sld", "Core scattering length density"],
+            ["radius", "Ang", 200., [0, np.inf], "volume", "Radius of the core"],
+            ["sld_solvent", "1e-6/Ang^2", 6.4, [-np.inf, np.inf], "sld", "Solvent scattering length density"],
+            ["n", "", float(1), [0, n_shells], "volume", "number of shells"],
+            ["sld[n]", "1e-6/Ang^2", 1.7, [-np.inf, np.inf], "sld", "scattering length density of shell k"],
+            ["thickness[n]", "Ang", 40., [0, np.inf], "volume", "Thickness of shell k"],
+        ]
+
+        processed_list = []
+        for entry in raw_params:
+            p = parse_parameter(*entry)
+            p.length_control = None
+            if '[n]' in p.name:
+                p.length = n_shells
+            else:
+                p.length = 1
+            processed_list.append(p)
+
+        partable = ParameterTable(processed_list)
+        my_info.parameters = partable
+        self._kernel = build_model(my_info)
+        self._last_n_shells = n_shells 
+        self._engines = None # Force engine rebuild on next calc
+
+    def get_profile(self) -> ProfileType:
+        """Reconstruct the radial SLD profile using the engine's profile method."""
+        # 1. Discretize Layer
+        thickness = self.molgroups_layer.thickness.value
+        if thickness <= 0: return None, None, None
+
+        z = np.arange(0, thickness, self.dz)
+        sld_layer = self.molgroups_layer._filled_profile(z)
+        n_shells = len(z)
+        if n_shells == 0: return None, None, None
+
+        # 2. Re-Use Calculation Logic
+        self._ensure_kernel(n_shells)
+        pars = self._generate_params(z, sld_layer, n_shells)
+        
+        # 3. Build engines if needed
+        if not self._engines:
+             # Create temp engines just for profile
+             self._engines = [DirectModel(data=d, model=self._kernel) for d in self._data_list]
+             
+        if not self._engines or not hasattr(self._engines[0], 'profile'):
+            return None, None, None
+            
+        try:
+            return self._engines[0].profile(**pars) # type: ignore
+        except (AttributeError, TypeError, NotImplementedError):
+            return None, None, None
+
+    def get_plots(self) -> PlotDict:
+        """Return dictionary of categorized plots (SANS Profile, CVO, etc)."""
+        plots: PlotDict = {
+            'parameter': [
+                ('SANS Layer Profile', functools.partial(cvo_plot, self.molgroups_layer))
+            ],
+            'uncertainty': [
+                ('SANS Layer CVO', functools.partial(cvo_uncertainty_plot, self.molgroups_layer))
+            ]
+        }
+        
+        # Check if we can generate a profile plot (needs kernel)
+        if self._kernel is None:
+             self._ensure_kernel(10) # Dummy init to check profile capability
+        
+        # If we have engines (or created a kernel that supports profile)
+        if self._kernel and self._kernel.info.profile is not None:
+            plots['parameter'].insert(0, ('SANS Radial Profile', sans_profile_plot))
+
+        return plots
+    
     def __getstate__(self) -> Dict[str, Any]:
+        """Custom pickling: Drop the C-pointer objects."""
         state = self.__dict__.copy()
         state['_engines'] = None 
         state['_kernel'] = None
@@ -526,29 +605,162 @@ class MolgroupsSphereSASModel(SASModel):
         self.__dict__.update(state)
 
 
-# --- 4. THE MIXIN ---
+# =============================================================================
+# 3. STANDALONE BUMPS EXPERIMENT
+# =============================================================================
+@dataclass(init=False)
+class MolgroupsSASExperiment:
+    """
+    Standalone Bumps Experiment for Molgroups SAS fitting.
+    
+    This class allows for SANS fitting using Molgroups components without needing
+    the full Refl1D experiment structure. It accepts standard `sasmodels.data.Data1D`
+    objects directly.
+    
+    Args:
+        data: Single or list of sasmodels.data.Data1D objects.
+        model: A SASModel instance (e.g. MolgroupsSphereSASModel).
+        name: Name of the experiment.
+    """
+    data: Union[Data1D, List[Data1D]]
+    model: SASModel
+    name: str = "SANS"
+
+    def __init__(self, data: Union[Data1D, List[Data1D]], model: SASModel, name: str = "SANS"):
+        self.data = data if isinstance(data, list) else [data]
+        self.model = model
+        self.name = name
+        
+        # Direct binding: Model gets pure Data1D
+        self.model.bind(self.data)
+        
+        self._webview_plots = {}
+        self._init_plots()
+
+    def update(self) -> None:
+        """Update the underlying molgroups layer before calculation."""
+        if hasattr(self.model, 'molgroups_layer'):
+            self.model.molgroups_layer.update()
+
+    def numpoints(self) -> int:
+        """Total number of data points across all datasets."""
+        return sum(len(d.x) for d in self.data)
+
+    def nllf(self) -> float:
+        """Calculate negative log likelihood (chi-squared)."""
+        self.update()
+        
+        Iq_calc = self.model.calculate()
+        
+        # Flatten data for comparison
+        data_mask = np.hstack([d.mask if hasattr(d, 'mask') and d.mask is not None else np.ones_like(d.x, dtype=bool) for d in self.data])
+        Iq_obs = np.hstack([d.y for d in self.data])
+        dIq_obs = np.hstack([d.dy for d in self.data])
+        
+        # Standard Chi2
+        residuals = (Iq_obs - Iq_calc) / dIq_obs
+        return 0.5 * np.sum(residuals[data_mask]**2)
+
+    def _init_plots(self) -> None:
+        """Register plots for Bumps webview."""
+        plot_groups = self.model.get_plots()
+        plot_groups.setdefault('parameter', [])
+        plot_groups['parameter'].insert(0, ('SAS Fit', self.plot_fit))
+        for key in plot_groups.keys():
+            for title, func in plot_groups.get(key, []):
+                self._webview_plots[title] = dict(change_with=key, func=functools.partial(self._wrap_plot, func))
+
+    @property
+    def webview_plots(self):
+        return self._webview_plots
+
+    def plot(self, view: str = 'log') -> None:
+        """Matplotlib interface (standard Bumps behavior)."""
+        import matplotlib.pyplot as plt
+        self.update()
+        Iq_calc_all = self.model.calculate()
+        
+        cursor = 0
+        for i, data in enumerate(self.data):
+            n = len(data.x)
+            Iq_calc = Iq_calc_all[cursor:cursor+n]
+            cursor += n
+            
+            if view == 'log':
+                plt.loglog(data.x, data.y, '.', label=f'{self.name} data {i}')
+                plt.loglog(data.x, Iq_calc, '-', label=f'{self.name} theory {i}')
+            else:
+                plt.plot(data.x, data.y, '.', label=f'{self.name} data {i}')
+                plt.plot(data.x, Iq_calc, '-', label=f'{self.name} theory {i}')
+        plt.legend()
+
+    def plot_fit(self, model=None, problem=None) -> CustomWebviewPlot:
+        """Generate Plotly fit plot for webview."""
+        self.update()
+        Iq_calc_all = self.model.calculate()
+        
+        fig = go.Figure()
+        cursor = 0
+        for i, data in enumerate(self.data):
+            n = len(data.x)
+            Iq_calc = Iq_calc_all[cursor:cursor+n]
+            cursor += n
+            
+            color = COLORS[i % len(COLORS)]
+            fig.add_trace(go.Scatter(x=data.x, y=data.y, error_y=dict(type='data', array=data.dy, visible=True),
+                                     mode='markers', name=f'Data {i}', marker=dict(color=color)))
+            fig.add_trace(go.Scatter(x=data.x, y=Iq_calc, mode='lines', name=f'Theory {i}', line=dict(color=color)))
+
+        fig.update_layout(title=f'{self.name} Fit', xaxis_title='Q (Å⁻¹)', yaxis_title='I(Q) (cm⁻¹)', 
+                          yaxis_type='log', xaxis_type='log', template='plotly_white')
+        return CustomWebviewPlot(fig_type='plotly', plotdata=fig)
+
+    def _wrap_plot(self, func, model=None, problem=None):
+        return func(model, problem)
+
+    def parameters(self) -> Dict[str, Any]:
+        """Bumps parameter discovery."""
+        return self.model.parameters
+
+
+# =============================================================================
+# 4. REFL1D EXPERIMENTS & MIXIN
+# =============================================================================
 
 class SASReflectivityMixin:
     """
     Mixin class that adds SAS capabilities to ANY Refl1D Experiment.
     
-    This mixin intercepts the `reflectivity` calculation to add the SAS contribution
-    and registers relevant SAS plots to the webview.
+    This mixin is responsible for bridging the gap between Refl1D objects and 
+    the SASModel. Specifically, it converts Refl1D `Probe` objects into 
+    `sasmodels.data.Data1D` objects, applying the appropriate resolution 
+    smearing (slit vs pinhole) based on the `dtheta_l` parameter.
     """
     
     sas_model: Optional[SASModel]
     _cache: Dict[str, Any]
     probe: Any
     name: str
+    dtheta_l: Optional[Union[float, List[float]]]
 
-    def _init_sas(self, sas_model: Optional[SASModel]) -> None:
+    def _init_sas(self, sas_model: Optional[SASModel], dtheta_l: Optional[Union[float, List[float]]] = None) -> None:
         """
         Initialize the SAS model and register plots.
+        
+        Args:
+            sas_model: The SASModel calculation engine.
+            dtheta_l: Optional angular divergence parameter for slit-smearing resolution.
+                      If provided, slit smearing resolution (`dxl`) is calculated. 
+                      If None, intrinsic probe resolution (`dQ`) is used for pinhole smearing.
         """
         self.sas_model = sas_model
+        self.dtheta_l = dtheta_l
         
         if self.sas_model is not None:
-            self.sas_model.bind(self.probe)
+            # 1. MIXIN RESPONSIBILITY: Convert Probe + dtheta_l -> Data1D
+            sas_data = self._prepare_data(self.probe)
+            # 2. BIND PURE DATA TO MODEL
+            self.sas_model.bind(sas_data)
         
         # Register main SAS/Refl plot
         self.register_webview_plot(
@@ -557,28 +769,53 @@ class SASReflectivityMixin:
             change_with='parameter'
         )
         
-        # Register model-specific plots via Polymorphism
+        # Register model-specific plots
         if self.sas_model is not None:
             plot_groups = self.sas_model.get_plots()
             
-            # Register parameter-driven plots
             for title, func in plot_groups.get('parameter', []):
-                self.register_webview_plot(
-                    plot_title=title, 
-                    plot_function=func, 
-                    change_with='parameter'
-                )
+                self.register_webview_plot(plot_title=title, plot_function=func, change_with='parameter')
                 
-            # Register uncertainty-driven plots
             for title, func in plot_groups.get('uncertainty', []):
-                self.register_webview_plot(
-                    plot_title=title, 
-                    plot_function=func, 
-                    change_with='uncertainty'
-                )
+                self.register_webview_plot(plot_title=title, plot_function=func, change_with='uncertainty')
+
+    def _prepare_data(self, probe_input: Any) -> List[Data1D]:
+        """
+        Convert Refl1D Probe/ProbeSet into a list of sasmodels Data1D objects.
+        
+        This method applies the resolution geometry logic.
+        """
+        if isinstance(probe_input, ProbeSet):
+            raw_probes = probe_input.probes
+        else:
+            raw_probes = [probe_input]
+
+        # Handle dtheta_l expansion
+        if np.isscalar(self.dtheta_l) or self.dtheta_l is None:
+            dtheta_list = [self.dtheta_l] * len(raw_probes)
+        else:
+            dtheta_list = self.dtheta_l # type: ignore
+
+        data_list = []
+        for probe, dtheta in zip(raw_probes, dtheta_list):
+            # Create basic Data1D container
+            data = Data1D(x=probe.Q)
+            
+            if dtheta is not None:
+                # Slit Smearing: Calculate dxl based on dtheta/probe geometry
+                data.dxl = dTdL2dQ(np.zeros_like(probe.T), dtheta, probe.L, probe.dL)
+                # Ensure gaussian width is zero if using slit smearing (dxl) to avoid double smearing
+                data.dxw = 2 * sigma2FWHM(probe.dQ)
+            elif hasattr(probe, 'dQ'):
+                # Pinhole/Gaussian Smearing: Map Refl1D 1-sigma dQ to sasmodels 1-sigma dx
+                data.dx = probe.dQ
+                data.dxl = None
+            
+            data_list.append(data)
+        return data_list
 
     def parameters(self) -> Dict[str, Any]:
-        base = super().parameters()  # type: ignore
+        base = super().parameters() # type: ignore
         if self.sas_model:
             return base | {'sas': self.sas_model.parameters}
         return base
@@ -605,24 +842,23 @@ class SASReflectivityMixin:
         Override standard reflectivity to add SAS contribution.
         Returns total intensity R(Q) + I(Q).
         """
-        Q, Rq = super().reflectivity(resolution, interpolation)  # type: ignore
+        Q, Rq = super().reflectivity(resolution, interpolation) # type: ignore
         if self.sas_model is not None:
             Rq = Rq + self.sas()
         return Q, Rq
 
-
-# --- 5. CONCRETE EXPERIMENT CLASSES ---
-
 @dataclass(init=False)
-class SASReflectivityExperiment(SASReflectivityMixin, Experiment):
+class SASReflectivityExperiment(SASReflectivityMixin, Refl1DExperiment):
     """
     Standard SAS + Reflectivity Experiment.
     Combines a standard Experiment with a SASModel.
     """
     sas_model: Optional[SASModel] = None
-    def __init__(self, sas_model: Optional[SASModel] = None, sample: Any = None, probe: Any = None, name: Optional[str] = None, **kwargs: Any) -> None:
-        super().__init__(sample, probe, name, **kwargs)
-        self._init_sas(sas_model)
+    dtheta_l: Optional[Union[float, List[float]]] = None
+    
+    def __init__(self, sas_model: Optional[SASModel] = None, dtheta_l=None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._init_sas(sas_model, dtheta_l)
 
 @dataclass(init=False)
 class SASReflectivityMolgroupsExperiment(SASReflectivityMixin, MolgroupsExperiment):
@@ -631,15 +867,19 @@ class SASReflectivityMolgroupsExperiment(SASReflectivityMixin, MolgroupsExperime
     Combines a MolgroupsExperiment with a SASModel.
     """
     sas_model: Optional[SASModel] = None
-    def __init__(self, sas_model: Optional[SASModel] = None, sample: Any = None, probe: Any = None, name: Optional[str] = None, **kwargs: Any) -> None:
-        super().__init__(sample, probe, name, **kwargs)
-        self._init_sas(sas_model)
+    dtheta_l: Optional[Union[float, List[float]]] = None
+
+    def __init__(self, sas_model: Optional[SASModel] = None, dtheta_l=None, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._init_sas(sas_model, dtheta_l)
 
         if isinstance(self.sas_model, MolgroupsSphereSASModel):
             self._molgroups_layers.update({self.sas_model.molgroups_layer.name: self.sas_model.molgroups_layer})
 
 
-# --- 6. PLOTTING FUNCTIONS ---
+# =============================================================================
+# 5. PLOTTING FUNCTIONS
+# =============================================================================
 
 def sas_decomposition_plot(model: SASReflectivityExperiment, problem: Any = None) -> CustomWebviewPlot:
     """
@@ -707,17 +947,24 @@ def sas_decomposition_plot(model: SASReflectivityExperiment, problem: Any = None
     
     return CustomWebviewPlot(fig_type='plotly', plotdata=fig, exportdata=csv_header + "\n".join(csv_rows))
 
-def sans_profile_plot(experiment: SASReflectivityExperiment, problem: Any = None) -> CustomWebviewPlot:
+def sans_profile_plot(experiment: Any, problem: Any = None) -> CustomWebviewPlot:
     """
     Unified plot for SANS SLD Profiles (Radius vs SLD).
-    Works for both StandardSASModel (via engine.profile) and MolgroupsSphereSASModel (via calculation).
+    Works for any Experiment or Model that has a sas_model attribute or is a SASModel.
     """
-    model = experiment.sas_model
+    # Handle different calling conventions (Experiment vs SASModel)
+    if hasattr(experiment, 'sas_model'):
+        model = experiment.sas_model
+    elif isinstance(experiment, SASModel):
+        model = experiment
+    elif hasattr(experiment, 'model') and isinstance(experiment.model, SASModel):
+        model = experiment.model
+    else:
+        model = None
+
     if model is None:
         return CustomWebviewPlot(fig_type='plotly', plotdata=go.Figure(), exportdata="")
 
-    # Retrieve profile via the polymorphic method
-    # Expects (x, y, labels) or (None, None, None)
     r, sld, labels = model.get_profile()
 
     if r is None or sld is None:
