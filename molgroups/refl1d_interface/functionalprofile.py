@@ -18,8 +18,12 @@ import numpy as np
 from ..mol import nSLDObj
 
 from bumps.dream.state import MCMCDraw
-from bumps.webview.server.custom_plot import CustomWebviewPlot
-from refl1d.webview.server.colors import COLORS
+try:
+    from bumps.plots.custom_plot import CustomWebviewPlot
+    from bumps.plots.colors import COLORS
+except ImportError:  # CRUFT: bumps pre-1.1
+    from bumps.webview.server.custom_plot import CustomWebviewPlot
+    from bumps.webview.server.colors import COLORS
 from refl1d.names import Slab, Stack, SLD, Experiment, FitProblem
 from refl1d.sample.flayer import FunctionalProfile
 

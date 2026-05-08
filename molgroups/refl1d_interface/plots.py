@@ -13,10 +13,15 @@ import plotly.graph_objs as go
 
 from bumps.dream.state import MCMCDraw
 from bumps.dream.stats import credible_interval
-from bumps.webview.server.custom_plot import CustomWebviewPlot
 from bumps.plotutil import form_quantiles
+try:
+    from bumps.plots.custom_plot import CustomWebviewPlot
+    from bumps.plots.colors import COLORS
+except ImportError:  # CRUFT: bumps pre-1.1
+    from bumps.webview.server.custom_plot import CustomWebviewPlot
+    from bumps.webview.server.colors import COLORS
+
 from refl1d.names import FitProblem, Experiment
-from refl1d.webview.server.colors import COLORS
 
 from .layers import MolgroupsLayer
 
