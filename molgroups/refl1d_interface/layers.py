@@ -168,7 +168,7 @@ the same ``Parameter`` instances, bumps treats all contrasts as a single
 jointly-constrained fit problem.
 """
 
-from typing import List, Literal, Union, Optional
+from typing import List
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -452,6 +452,10 @@ class MolgroupsStack(Stack):
             overlap contract* in the module docstring).
         molgroups_layer: The :class:`MolgroupsLayer` that defines the
             molecular structure.
+        name: Name used for this stack in Refl1D plots and parameter trees.
+            Pass ``name=mollayer.name`` to propagate the layer name; if
+            omitted the default ``"MolgroupsStack"`` is used for all
+            contrasts, which causes plots to be labelled incorrectly.
 
     Example::
 
