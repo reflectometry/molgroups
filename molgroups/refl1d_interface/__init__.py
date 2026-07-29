@@ -7,6 +7,7 @@ from molgroups.refl1d_interface.layers import (MolgroupsStack,
 
 from molgroups.refl1d_interface.groups import (Substrate,
                                                SolidSupportedBilayer,
+                                               SolidSupportedBilayerLinearRoughness,
                                                TetheredBilayer,
                                                Freeform,
                                                Bilayer,

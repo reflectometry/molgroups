@@ -456,6 +456,91 @@ class SolidSupportedBilayer(BaseGroupInterface):
         self.normarea.value = self._molgroup.normarea
 
 @dataclass
+class SolidSupportedBilayerLinearRoughness(SolidSupportedBilayer):
+    """
+    Refl1D interactor for an ssBLM with a linear roughness gradient.
+    Roughness scales linearly from the bottom surface to the top surface of the bilayer.
+    """
+    
+    # We only introduce a top roughness parameter.
+    # We will repurpose the inherited 'sigma' parameter to act as the bottom roughness.
+    sigma_top: Parameter = field(default_factory=lambda: Parameter(name='bilayer top roughness', value=6.0))
+
+    def __post_init__(self):
+        super().__post_init__()
+        # Rename the inherited 'sigma' parameter so it correctly identifies itself 
+        # in the parameter tree without being an orphan.
+        self.sigma.name = f"{self.name} bilayer bottom roughness"
+
+    def update(self):
+        # 1. Run the standard update. The underlying mol.ssBLM will initially use 
+        # self.sigma.value as the global roughness before we overwrite the individual components.
+        super().update()
+
+        blm = self._molgroup
+        
+        # 2. Determine the absolute bottom and top z-coordinates of the bilayer
+        z_bottom = blm.z_ihc - 0.5 * blm.l_ihc - blm.av_hg1_l
+        z_top = blm.z_ohc + 0.5 * blm.l_ohc + blm.av_hg2_l
+        
+        # Map our parameter values for clarity
+        sigma_bottom_val = self.sigma.value
+        sigma_top_val = self.sigma_top.value
+        
+        # 3. Helper function to linearly interpolate sigma at any given z position
+        def get_sigma(z_target):
+            if z_top == z_bottom:
+                return sigma_bottom_val
+            slope = (sigma_top_val - sigma_bottom_val) / (z_top - z_bottom)
+            return sigma_bottom_val + slope * (z_target - z_bottom)
+
+        # 4. Manually override the roughnesses on every sub-component box
+        
+        # Inner headgroups
+        for hg1 in blm.headgroups1:
+            hg1.fnSetSigma(get_sigma(hg1.z - 0.5 * hg1.length), get_sigma(hg1.z + 0.5 * hg1.length))
+
+        # Outer headgroups
+        for hg2 in blm.headgroups2:
+            hg2.fnSetSigma(get_sigma(hg2.z - 0.5 * hg2.length), get_sigma(hg2.z + 0.5 * hg2.length))
+
+        # Acyl chains and terminal methyls (which require methyl_sigma consideration)
+        for i, (m1, mm1, mm2, m2) in enumerate(zip(blm.methylenes1, blm.methyls1, blm.methyls2, blm.methylenes2)):
+            
+            # Methylene 1 (inner)
+            sig1_m1 = get_sigma(m1.z - 0.5 * m1.length)
+            sig2_m1 = get_sigma(m1.z + 0.5 * m1.length)
+            sig2_m1_methyl = np.sqrt(sig2_m1**2 + blm.methyl_sigma[i]**2)
+            m1.fnSetSigma(sig1_m1, sig2_m1_methyl)
+
+            # Methyl 1 (inner)
+            sig1_mm1 = get_sigma(mm1.z - 0.5 * mm1.length)
+            sig2_mm1 = get_sigma(mm1.z + 0.5 * mm1.length)
+            sig1_mm1_methyl = np.sqrt(sig1_mm1**2 + blm.methyl_sigma[i]**2)
+            sig2_mm1_methyl = np.sqrt(sig2_mm1**2 + blm.methyl_sigma[i]**2)
+            mm1.fnSetSigma(sig1_mm1_methyl, sig2_mm1_methyl)
+
+            # Methyl 2 (outer)
+            sig1_mm2 = get_sigma(mm2.z - 0.5 * mm2.length)
+            sig2_mm2 = get_sigma(mm2.z + 0.5 * mm2.length)
+            sig1_mm2_methyl = np.sqrt(sig1_mm2**2 + blm.methyl_sigma[i]**2)
+            sig2_mm2_methyl = np.sqrt(sig2_mm2**2 + blm.methyl_sigma[i]**2)
+            mm2.fnSetSigma(sig1_mm2_methyl, sig2_mm2_methyl)
+
+            # Methylene 2 (outer)
+            sig1_m2 = get_sigma(m2.z - 0.5 * m2.length)
+            sig2_m2 = get_sigma(m2.z + 0.5 * m2.length)
+            sig1_m2_methyl = np.sqrt(sig1_m2**2 + blm.methyl_sigma[i]**2)
+            m2.fnSetSigma(sig1_m2_methyl, sig2_m2)
+
+        # Defects (hydrocarbon core and headgroup region)
+        def_hc = blm.defect_hydrocarbon
+        def_hc.fnSetSigma(get_sigma(def_hc.z - 0.5 * def_hc.length), get_sigma(def_hc.z + 0.5 * def_hc.length))
+
+        def_hg = blm.defect_headgroup
+        def_hg.fnSetSigma(get_sigma(def_hg.z - 0.5 * def_hg.length), get_sigma(def_hg.z + 0.5 * def_hg.length))
+
+@dataclass
 class TetheredBilayer(BaseGroupInterface):
     """Refl1D interactor for ssBLM class
     """
