@@ -470,7 +470,8 @@ class SolidSupportedBilayerLinearRoughness(SolidSupportedBilayer):
         super().__post_init__()
         # Rename the inherited 'sigma' parameter so it correctly identifies itself 
         # in the parameter tree without being an orphan.
-        self.sigma.name = f"{self.name} bilayer bottom roughness"
+        if isinstance(self.sigma, Parameter):
+            self.sigma.name = f"{self.name} bilayer bottom roughness"
 
     def update(self):
         # 1. Run the standard update. The underlying mol.ssBLM will initially use 
