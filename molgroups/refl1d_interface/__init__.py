@@ -1,3 +1,9 @@
+from molgroups.refl1d_interface.bragg import (GaussianBraggPeak,
+                                              LorentzianBraggPeak,
+                                              VoigtBraggPeak,
+                                              BraggExperiment,
+                                              BraggMolgroupsExperiment)
+
 from molgroups.refl1d_interface.experiment import (MolgroupsExperiment,
                                                    MolgroupsMixedExperiment,
                                                    make_samples)
