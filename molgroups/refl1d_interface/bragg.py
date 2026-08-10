@@ -19,7 +19,7 @@ from typing import Dict, Optional, Union
 import numpy as np
 from scipy.special import voigt_profile
 
-from bumps.parameter import Parameter
+from bumps.parameter import Parameter, BaseParameter
 from refl1d.experiment import Experiment as Refl1DExperiment
 from refl1d.probe import ProbeSet
 
@@ -47,7 +47,7 @@ class BraggPeak:
     def __post_init__(self) -> None:
         for name in ['q0', 'scale', 'background']:
             val = getattr(self, name)
-            if not isinstance(val, Parameter):
+            if not isinstance(val, BaseParameter):
                 setattr(self, name, Parameter.default(val, name=f'bragg_{name}'))
 
     def _shape(self, Q: np.ndarray) -> np.ndarray:
@@ -114,7 +114,7 @@ class VoigtBraggPeak(BraggPeak):
         super().__post_init__()
         for name in ['sigma', 'gamma']:
             val = getattr(self, name)
-            if not isinstance(val, Parameter):
+            if not isinstance(val, BaseParameter):
                 setattr(self, name, Parameter.default(val, name=f'bragg_{name}'))
 
     def _shape(self, Q: np.ndarray) -> np.ndarray:
