@@ -1435,6 +1435,69 @@ class ssBLM(BLM):
         return rdict
 
 
+class ssBLMLinearRoughness(ssBLM):
+    """ssBLM with a linear roughness gradient across the bilayer.
+
+    sigma (passed to fnSet / fnSetSigma) is the roughness at the bottom of the
+    inner headgroup region; sigma_top is the roughness at the top of the outer
+    headgroup region.  All component sigmas are interpolated linearly between
+    those two values.  The substrate and siox layers still use global_rough.
+    """
+
+    def __init__(self, *args, sigma_top=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.sigma_top = sigma_top if sigma_top is not None else self.sigma
+
+    def fnSetSigma(self, sigma):
+        # substrate / siox: same as base ssBLM
+        self.substrate.fnSetSigma(self.global_rough)
+        self.siox.fnSetSigma(self.global_rough)
+
+        sigma_bottom = sigma
+        sigma_top = self.sigma_top
+
+        z_bottom = self.z_ihc - 0.5 * self.l_ihc - self.av_hg1_l
+        z_top = self.z_ohc + 0.5 * self.l_ohc + self.av_hg2_l
+
+        def get_sigma(z_target):
+            if z_top == z_bottom:
+                return sigma_bottom
+            return sigma_bottom + (sigma_top - sigma_bottom) * (z_target - z_bottom) / (z_top - z_bottom)
+
+        for hg1 in self.headgroups1:
+            hg1.fnSetSigma(get_sigma(hg1.z - 0.5 * hg1.length), get_sigma(hg1.z + 0.5 * hg1.length))
+
+        for hg2 in self.headgroups2:
+            hg2.fnSetSigma(get_sigma(hg2.z - 0.5 * hg2.length), get_sigma(hg2.z + 0.5 * hg2.length))
+
+        for i, (m1, mm1, mm2, m2) in enumerate(zip(self.methylenes1, self.methyls1, self.methyls2, self.methylenes2)):
+            sig1_m1 = get_sigma(m1.z - 0.5 * m1.length)
+            sig2_m1 = get_sigma(m1.z + 0.5 * m1.length)
+            m1.fnSetSigma(sig1_m1, numpy.sqrt(sig2_m1**2 + self.methyl_sigma[i]**2))
+
+            sig1_mm1 = get_sigma(mm1.z - 0.5 * mm1.length)
+            sig2_mm1 = get_sigma(mm1.z + 0.5 * mm1.length)
+            mm1.fnSetSigma(numpy.sqrt(sig1_mm1**2 + self.methyl_sigma[i]**2),
+                           numpy.sqrt(sig2_mm1**2 + self.methyl_sigma[i]**2))
+
+            sig1_mm2 = get_sigma(mm2.z - 0.5 * mm2.length)
+            sig2_mm2 = get_sigma(mm2.z + 0.5 * mm2.length)
+            mm2.fnSetSigma(numpy.sqrt(sig1_mm2**2 + self.methyl_sigma[i]**2),
+                           numpy.sqrt(sig2_mm2**2 + self.methyl_sigma[i]**2))
+
+            sig1_m2 = get_sigma(m2.z - 0.5 * m2.length)
+            sig2_m2 = get_sigma(m2.z + 0.5 * m2.length)
+            m2.fnSetSigma(numpy.sqrt(sig1_m2**2 + self.methyl_sigma[i]**2), sig2_m2)
+
+        self.defect_hydrocarbon.fnSetSigma(
+            get_sigma(self.defect_hydrocarbon.z - 0.5 * self.defect_hydrocarbon.length),
+            get_sigma(self.defect_hydrocarbon.z + 0.5 * self.defect_hydrocarbon.length))
+
+        self.defect_headgroup.fnSetSigma(
+            get_sigma(self.defect_headgroup.z - 0.5 * self.defect_headgroup.length),
+            get_sigma(self.defect_headgroup.z + 0.5 * self.defect_headgroup.length))
+
+
 class tBLM(BLM):
     def __init__(self, tether, filler, inner_lipids=None, inner_lipid_nf=None, outer_lipids=None, outer_lipid_nf=None,
                  lipids=None, lipid_nf=None, xray_wavelength=None, name='tblm', **kwargs):

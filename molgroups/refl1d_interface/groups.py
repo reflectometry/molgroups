@@ -397,13 +397,16 @@ class SolidSupportedBilayer(BaseGroupInterface):
     outer_headgroup_center: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_center', description='center of outer headgroups'))
     outer_headgroup_top: ReferencePoint = field(default_factory=lambda: ReferencePoint(name='outer_headgroup_top', description='top of outer headgroups'))
 
+    def _make_molgroup(self) -> mol.ssBLM:
+        return mol.ssBLM(inner_lipids=self.lipids,
+                         outer_lipids=self.lipids,
+                         inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
+                         outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
+                         xray_wavelength=self.xray_wavelength,
+                         name=self.name)
+
     def __post_init__(self):
-        self._molgroup = mol.ssBLM(inner_lipids=self.lipids,
-                               outer_lipids=self.lipids,
-                             inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
-                             outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
-                             xray_wavelength=self.xray_wavelength,
-                             name=self.name)
+        self._molgroup = self._make_molgroup()
 
         n_lipids = len(self.lipids)
         self._group_names = {'substrate': [f'{self.name}.substrate'],
@@ -459,72 +462,25 @@ class SolidSupportedBilayer(BaseGroupInterface):
 class SolidSupportedBilayerLinearRoughness(SolidSupportedBilayer):
     """
     Refl1D interactor for an ssBLM with a linear roughness gradient.
-    Roughness scales linearly from the bottom surface to the top surface of the bilayer.
+    Roughness scales linearly from sigma (bottom of inner headgroups) to
+    sigma_top (top of outer headgroups).
     """
-    
-    # We only introduce a top roughness parameter.
-    # We will repurpose the inherited 'sigma' parameter to act as the bottom roughness.
+
     sigma_top: Parameter = field(default_factory=lambda: Parameter(name='bilayer top roughness', value=6.0))
 
-    def __post_init__(self):
-        super().__post_init__()
-        # Rename the inherited 'sigma' parameter so it correctly identifies itself 
-        # in the parameter tree without being an orphan.
-        if isinstance(self.sigma, Parameter):
-            self.sigma.name = f"{self.name} bilayer bottom roughness"
-
-    def _apply_linear_roughness(self):
-        """Apply per-component linear roughness gradient. Must be called after fnAdjustParameters
-        (or anything else that calls fnSetSigma on the underlying mol object), because those calls
-        reset all components to uniform sigma."""
-        blm = self._molgroup
-
-        z_bottom = blm.z_ihc - 0.5 * blm.l_ihc - blm.av_hg1_l
-        z_top = blm.z_ohc + 0.5 * blm.l_ohc + blm.av_hg2_l
-
-        sigma_bottom_val = self.sigma.value
-        sigma_top_val = self.sigma_top.value
-
-        def get_sigma(z_target):
-            if z_top == z_bottom:
-                return sigma_bottom_val
-            slope = (sigma_top_val - sigma_bottom_val) / (z_top - z_bottom)
-            return sigma_bottom_val + slope * (z_target - z_bottom)
-
-        for hg1 in blm.headgroups1:
-            hg1.fnSetSigma(get_sigma(hg1.z - 0.5 * hg1.length), get_sigma(hg1.z + 0.5 * hg1.length))
-
-        for hg2 in blm.headgroups2:
-            hg2.fnSetSigma(get_sigma(hg2.z - 0.5 * hg2.length), get_sigma(hg2.z + 0.5 * hg2.length))
-
-        for i, (m1, mm1, mm2, m2) in enumerate(zip(blm.methylenes1, blm.methyls1, blm.methyls2, blm.methylenes2)):
-            sig1_m1 = get_sigma(m1.z - 0.5 * m1.length)
-            sig2_m1 = get_sigma(m1.z + 0.5 * m1.length)
-            m1.fnSetSigma(sig1_m1, np.sqrt(sig2_m1**2 + blm.methyl_sigma[i]**2))
-
-            sig1_mm1 = get_sigma(mm1.z - 0.5 * mm1.length)
-            sig2_mm1 = get_sigma(mm1.z + 0.5 * mm1.length)
-            mm1.fnSetSigma(np.sqrt(sig1_mm1**2 + blm.methyl_sigma[i]**2),
-                           np.sqrt(sig2_mm1**2 + blm.methyl_sigma[i]**2))
-
-            sig1_mm2 = get_sigma(mm2.z - 0.5 * mm2.length)
-            sig2_mm2 = get_sigma(mm2.z + 0.5 * mm2.length)
-            mm2.fnSetSigma(np.sqrt(sig1_mm2**2 + blm.methyl_sigma[i]**2),
-                           np.sqrt(sig2_mm2**2 + blm.methyl_sigma[i]**2))
-
-            sig1_m2 = get_sigma(m2.z - 0.5 * m2.length)
-            sig2_m2 = get_sigma(m2.z + 0.5 * m2.length)
-            m2.fnSetSigma(np.sqrt(sig1_m2**2 + blm.methyl_sigma[i]**2), sig2_m2)
-
-        def_hc = blm.defect_hydrocarbon
-        def_hc.fnSetSigma(get_sigma(def_hc.z - 0.5 * def_hc.length), get_sigma(def_hc.z + 0.5 * def_hc.length))
-
-        def_hg = blm.defect_headgroup
-        def_hg.fnSetSigma(get_sigma(def_hg.z - 0.5 * def_hg.length), get_sigma(def_hg.z + 0.5 * def_hg.length))
+    def _make_molgroup(self) -> mol.ssBLMLinearRoughness:
+        return mol.ssBLMLinearRoughness(
+            inner_lipids=self.lipids,
+            outer_lipids=self.lipids,
+            inner_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.inner_lipid_nf],
+            outer_lipid_nf=[p.value if hasattr(p, 'value') else p for p in self.outer_lipid_nf],
+            xray_wavelength=self.xray_wavelength,
+            sigma_top=self.sigma_top.value,
+            name=self.name)
 
     def update(self):
+        self._molgroup.sigma_top = self.sigma_top.value
         super().update()
-        self._apply_linear_roughness()
 
 @dataclass
 class TetheredBilayer(BaseGroupInterface):
@@ -887,12 +843,6 @@ class BilayerProteinComplex(BaseGroupInterface):
 
         self.normarea.value = self.base_blm.normarea.value
         self._molgroup.fnAdjustBLMs()
-
-        # fnAdjustBLMs calls fnAdjustParameters on each bilayer, which resets all component
-        # sigmas to uniform via fnSetSigma. Re-apply any position-dependent roughness afterward.
-        for gp in self.all_blms:
-            if hasattr(gp, '_apply_linear_roughness'):
-                gp._apply_linear_roughness()
 
     def store_profile(self, z: np.ndarray) -> Dict:
         # special profile storage that takes into account excess density.
