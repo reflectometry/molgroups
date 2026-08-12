@@ -30,6 +30,7 @@ dependencies = [
 [project.optional-dependencies]
 examples = ["sasdata", "pandas", "sasmodels"]
 refl1d = ["refl1d"]
+sas = ["sasmodels"]
 
 [project.urls]
 repository = "https://github.com/reflectometry/molgroups"
