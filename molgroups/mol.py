@@ -2653,7 +2653,7 @@ class BLMProteinComplex(CompositenSLDObj):
             rdict[cName] = {}
 
         total_bilayer_mass = 0.0
-        for blm in self.blms.groups:
+        for blm in self.blms:
             inner_normarea = blm.V_ihc / blm.l_ihc
             total_bilayer_mass += ((blm.inner_lipid_mass / inner_normarea) + blm.outer_lipid_mass / blm.normarea) \
                                   * blm.vf_bilayer * blm.nf * 1.66e-24 * 1e16 * 1e9
